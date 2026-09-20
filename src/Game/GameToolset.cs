@@ -5,7 +5,10 @@ using BonelabAIAgent.Fusion;
 using BonelabAIAgent.Infrastructure;
 using BonelabAIAgent.Tools;
 using Il2CppSLZ.Marrow;
+using Il2CppSLZ.Marrow.Combat;
+using Il2CppSLZ.Marrow.Data;
 using Il2CppSLZ.Marrow.Interaction;
+using Il2CppSLZ.Marrow.Warehouse;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -14,6 +17,8 @@ namespace BonelabAIAgent.Game;
 
 public sealed class GameToolset
 {
+    private sealed record AvatarEntry(string title, string barcode, string pallet);
+
     private readonly AgentConfig _config;
     private readonly FusionBridge _fusion;
     private readonly ObjectRegistry _objects = new();
@@ -36,11 +41,17 @@ public sealed class GameToolset
         Register(r, "player.set_health", "Set local current health. arguments: value.", SetHealth, action:true, player:true);
         Register(r, "player.heal", "Restore local player to full health.", Heal, action:true, player:true);
         Register(r, "player.damage", "Damage local player. arguments: amount.", DamagePlayer, action:true, player:true);
-        Register(r, "player.set_avatar", "Change avatar by exact barcode. arguments: barcode.", SetAvatar, action:true, player:true);
+        Register(r, "avatar.list", "Search the complete installed Marrow avatar catalog, including SDK mod avatars. arguments: optional query and limit.", ListAvatars);
+        Register(r, "avatar.find", "Find installed avatars by display name or barcode. arguments: query, optional limit.", ListAvatars);
+        Register(r, "avatar.set", "Change the local avatar by fuzzy display name or exact barcode. arguments: query or barcode.", SetAvatar, action:true, player:true);
+        Register(r, "player.list_avatars", "Search the complete installed avatar catalog. arguments: optional query and limit.", ListAvatars);
+        Register(r, "player.set_avatar", "Change the local avatar by fuzzy display name or exact barcode. arguments: query or barcode.", SetAvatar, action:true, player:true);
         Register(r, "player.set_physics", "Set runtime avatar strength/speed/agility/vitality. arguments may include upperStrength, lowerStrength, gripStrength, speed, agility, vitality.", SetPhysics, action:true, player:true);
         Register(r, "player.restore_physics", "Restore runtime avatar physics values captured before the first override.", RestorePhysics, action:true, player:true);
         Register(r, "world.list_nearby", "List compact descriptions and stable IDs for nearby objects. optional arguments: radius, limit.", ListNearby);
         Register(r, "world.find_object", "Fuzzy find nearby objects. arguments: query, optional radius.", FindObject);
+        Register(r, "world.find_npc", "Find nearby NPCs by name, returning stable object IDs. arguments: optional query and radius.", FindNpc);
+        Register(r, "world.find_interactable", "Find nearby grips, buttons, levers, doors, guns and seats. arguments: optional query and radius.", FindInteractable);
         Register(r, "world.get_object_info", "Inspect a registered object. arguments: objectId.", ObjectInfo);
         Register(r, "world.get_scene_info", "Get active scene and object counts.", SceneInfo);
         Register(r, "spawn.list", "Search SpawnLab's complete base-game and downloaded SDK spawnable catalog. arguments: query, optional limit.", SearchSpawnables);
@@ -70,7 +81,9 @@ public sealed class GameToolset
         Register(r, "combat.aim", "Aim a held gun at an object. arguments: objectId, hand.", Aim, action:true, combat:true);
         Register(r, "combat.shoot", "Fire a held gun. arguments: hand, optional shots.", Shoot, action:true, combat:true);
         Register(r, "combat.reload", "Request instant load on a held gun when supported. arguments: hand.", Reload, action:true, combat:true);
-        Register(r, "combat.damage", "Apply real Marrow damage to a target through its damage receiver. arguments: objectId, amount.", DamageTarget, action:true, combat:true);
+        Register(r, "combat.damage", "Apply a real Marrow Attack to a target's ReceiveAttack path, with legacy health fallback. arguments: objectId, amount.", DamageTarget, action:true, combat:true);
+        Register(r, "combat.attack_target", "Perform a real attack on an object ID: aim/fire a held gun, send Fusion player damage, or damage/impulse an NPC. arguments: objectId, optional amount, hand, shots.", AttackTarget, action:true, combat:true);
+        Register(r, "combat.attack_player", "Attack a Fusion player through Fusion's PlayerSender damage path. arguments: smallId or query, optional amount.", AttackFusionPlayer, action:true, combat:true);
         Register(r, "combat.hit", "Hit a target with a physical impulse. arguments: objectId, force {x,y,z}.", ApplyImpulse, action:true, combat:true);
         Register(r, "combat.punch", "Punch a target with a physical impulse. arguments: objectId, force {x,y,z}.", ApplyImpulse, action:true, combat:true);
         Register(r, "combat.kick", "Kick a target with a physical impulse. arguments: objectId, force {x,y,z}.", ApplyImpulse, action:true, combat:true);
@@ -84,6 +97,7 @@ public sealed class GameToolset
         Register(r, "vehicle.exit", "Exit the local player's current seat.", ExitVehicle, action:true);
         Register(r, "fusion.get_session", "Get detected Fusion state and authority mode.", c => ToolResult.Success(c, _fusion.GetSession()));
         Register(r, "fusion.get_players", "Get Fusion players from the installed Fusion API.", c => ToolResult.Success(c, _fusion.GetPlayers()));
+        Register(r, "fusion.find_player", "Find Fusion players by username or numeric small ID and return stable rig object IDs. arguments: query.", FindFusionPlayer);
         Register(r, "fusion.get_sync_report", "Explain which action categories use ordinary Fusion replication and which remain local.", c => ToolResult.Success(c, _fusion.GetSynchronizationReport()));
         Register(r, "mods.list_loaded", "List loaded MelonLoader mod assemblies and versions.", LoadedMods);
         Register(r, "mods.get_capabilities", "List useful capabilities discovered in the user's installed mod DLLs and whether the AI integrates them.", ModCapabilities);
@@ -102,7 +116,15 @@ public sealed class GameToolset
             return handler(c);
         });
 
-    public object GetCompactContext() => new { player = SafeState(), fusion = _fusion.GetSession(), nearby = CompactNearby(8f, 12), recentScene = SceneManager.GetActiveScene().name };
+    public object GetCompactContext() => new
+    {
+        player = SafeState(),
+        permissions = new { actions = _config.AllowActions.Value, playerModification = _config.AllowPlayerModification.Value, spawning = _config.AllowSpawning.Value, combat = _config.AllowCombat.Value, fusionSynchronization = _config.FusionSynchronization.Value },
+        fusion = _fusion.GetSession(),
+        fusionPlayers = FusionPlayerData(),
+        nearby = CompactNearby(10f, 20),
+        recentScene = SceneManager.GetActiveScene().name
+    };
     private object SafeState() { try { return PlayerStateData(); } catch (Exception ex) { return new { available=false, error=ex.Message }; } }
     private ToolResult GetPlayerState(ToolCall c) => ToolResult.Success(c, PlayerStateData());
     private object PlayerStateData()
@@ -116,7 +138,27 @@ public sealed class GameToolset
     private ToolResult SetHealth(ToolCall c) { var h=NeedRig().health; SetMember(h,"curr_Health",Num(c,"value")); return ToolResult.Success(c,new{health=ReadMember(h,"curr_Health")}); }
     private ToolResult Heal(ToolCall c) { NeedRig().health.SetFullHealth(); return ToolResult.Success(c,new{health=ReadMember(NeedRig().health,"curr_Health")}); }
     private ToolResult DamagePlayer(ToolCall c) { NeedRig().health.TAKEDAMAGE(Num(c,"amount")); return ToolResult.Success(c,new{health=ReadMember(NeedRig().health,"curr_Health")}); }
-    private ToolResult SetAvatar(ToolCall c) { var barcode=Str(c,"barcode"); NeedRig().SwapAvatarCrate(new Il2CppSLZ.Marrow.Warehouse.Barcode(barcode),true,null); return ToolResult.Success(c,new{barcode,pending=true}); }
+    private ToolResult ListAvatars(ToolCall c)
+    {
+        var query = c.Arguments["query"]?.Value<string>() ?? string.Empty;
+        var limit = Math.Clamp(c.Arguments["limit"]?.Value<int>() ?? 25, 1, 100);
+        return ToolResult.Success(c, AvatarCatalog().OrderBy(x => Score(x.title, query)).ThenBy(x => x.title).Take(limit).ToArray());
+    }
+    private ToolResult SetAvatar(ToolCall c)
+    {
+        var request = c.Arguments["barcode"]?.Value<string>() ?? c.Arguments["query"]?.Value<string>() ?? throw new ArgumentException("Missing avatar query or barcode.");
+        var avatars = AvatarCatalog().ToArray();
+        var match = avatars.FirstOrDefault(x => string.Equals(x.barcode, request, StringComparison.OrdinalIgnoreCase))
+                    ?? avatars.OrderBy(x => Score(x.title, request)).ThenBy(x => Score(x.barcode, request)).FirstOrDefault();
+        if (match == null) return ToolResult.Failure(c, $"No installed avatar matched '{request}'.");
+        if (_fusion.IsOnline && _config.FusionSynchronization.Value)
+        {
+            _fusion.SwapLocalAvatar(match.barcode);
+            return ToolResult.Success(c, new { match.title, match.barcode, pending = true, synchronization = "LabFusion LocalAvatar.SwapAvatarCrate" });
+        }
+        NeedRig().SwapAvatarCrate(new Barcode(match.barcode), true, null);
+        return ToolResult.Success(c, new { match.title, match.barcode, pending = true, synchronization = "local" });
+    }
     private ToolResult SetPhysics(ToolCall c)
     {
         var a=Player.Avatar ?? throw new InvalidOperationException("No active avatar.");
@@ -127,8 +169,63 @@ public sealed class GameToolset
     private ToolResult RestorePhysics(ToolCall c) { var a=Player.Avatar??throw new InvalidOperationException("No active avatar."); foreach(var x in _avatarDefaults) SetMember(a,x.Key,x.Value); _avatarDefaults.Clear(); return ToolResult.Success(c); }
     private ToolResult ListNearby(ToolCall c) => ToolResult.Success(c,CompactNearby(c.Arguments["radius"]?.Value<float>()??_config.WorldQueryRadius.Value,c.Arguments["limit"]?.Value<int>()??_config.WorldQueryLimit.Value));
     private ToolResult FindObject(ToolCall c) { var q=Str(c,"query"); var all=NearbyObjects(c.Arguments["radius"]?.Value<float>()??_config.WorldQueryRadius.Value,100).OrderBy(x=>Score(x.name,q)).Take(10).Select(x=>Describe(x)).ToArray(); return ToolResult.Success(c,all); }
+    private ToolResult FindNpc(ToolCall c) => FindSemantic(c, IsNpc);
+    private ToolResult FindInteractable(ToolCall c) => FindSemantic(c, IsInteractable);
     private ToolResult ObjectInfo(ToolCall c) { var go=NeedObject(c); return ToolResult.Success(c,Describe(go,true)); }
     private ToolResult SceneInfo(ToolCall c) => ToolResult.Success(c,new{name=SceneManager.GetActiveScene().name,buildIndex=SceneManager.GetActiveScene().buildIndex,nearbyCount=NearbyObjects(_config.WorldQueryRadius.Value,500).Count});
+    private ToolResult FindSemantic(ToolCall c, Func<GameObject, bool> predicate)
+    {
+        var query = c.Arguments["query"]?.Value<string>() ?? string.Empty;
+        var radius = c.Arguments["radius"]?.Value<float>() ?? _config.WorldQueryRadius.Value;
+        var matches = NearbyObjects(radius, 300).Where(predicate).OrderBy(x => Score(x.name, query)).ThenBy(x => Vector3.Distance(Player.Head?.transform.position ?? Vector3.zero, x.transform.position)).Take(20).Select(x => Describe(x)).ToArray();
+        return ToolResult.Success(c, matches);
+    }
+
+    private object[] FusionPlayerData() => _fusion.GetPlayerSnapshots().Select(x => new
+    {
+        smallId = x.SmallId,
+        username = x.Username,
+        isHost = x.IsHost,
+        isMe = x.IsMe,
+        objectId = x.RigObject == null ? null : _objects.Register(x.RigObject),
+        position = V(x.Position)
+    }).Cast<object>().ToArray();
+
+    private ToolResult FindFusionPlayer(ToolCall c)
+    {
+        var query = Str(c, "query");
+        var players = _fusion.GetPlayerSnapshots().OrderBy(x => Score(x.Username, query)).ThenBy(x => x.SmallId).Select(x => new
+        {
+            smallId = x.SmallId,
+            username = x.Username,
+            isHost = x.IsHost,
+            isMe = x.IsMe,
+            objectId = x.RigObject == null ? null : _objects.Register(x.RigObject),
+            position = V(x.Position)
+        }).Take(10).ToArray();
+        return ToolResult.Success(c, players);
+    }
+
+    private FusionBridge.PlayerSnapshot ResolveFusionPlayer(ToolCall c)
+    {
+        var players = _fusion.GetPlayerSnapshots();
+        if (c.Arguments["smallId"]?.Value<byte?>() is byte id)
+            return players.FirstOrDefault(x => x.SmallId == id) ?? throw new InvalidOperationException($"Fusion player {id} was not found.");
+        var query = Str(c, "query");
+        return players.OrderBy(x => Score(x.Username, query)).FirstOrDefault() ?? throw new InvalidOperationException($"No Fusion player matched '{query}'.");
+    }
+
+    private IEnumerable<AvatarEntry> AvatarCatalog()
+    {
+        var warehouse = AssetWarehouse.Instance ?? throw new InvalidOperationException("Marrow AssetWarehouse is not ready.");
+        foreach (var crate in warehouse.GetCrates())
+        {
+            if (crate is not AvatarCrate avatar) continue;
+            var barcode = avatar.Barcode?.ID ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(barcode)) continue;
+            yield return new AvatarEntry(avatar.Title ?? barcode, barcode, avatar.Pallet?.Title ?? string.Empty);
+        }
+    }
 
     private ToolResult SearchSpawnables(ToolCall c)
     {
@@ -168,8 +265,67 @@ public sealed class GameToolset
     private ToolResult DamageTarget(ToolCall c)
     {
         var go=NeedObject(c); var amount=Num(c,"amount");
-        foreach(var comp in go.GetComponentsInChildren<Component>()){var m=comp.GetType().GetMethod("TAKEDAMAGE",new[]{typeof(float)})??comp.GetType().GetMethod("TakeDamage",new[]{typeof(float)}); if(m!=null){m.Invoke(comp,new object[]{amount}); return ToolResult.Success(c,new{component=comp.GetType().Name,amount});}}
+        var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
+        var attack = CreateAttack(amount, origin, go.transform.position - origin);
+        foreach (var comp in go.GetComponentsInChildren<Component>())
+        {
+            var receive = comp.GetType().GetMethod("ReceiveAttack", new[] { typeof(Attack) });
+            if (receive != null)
+            {
+                receive.Invoke(comp, new object[] { attack });
+                return ToolResult.Success(c, new { component = comp.GetType().Name, method = "ReceiveAttack", amount, synchronization = _fusion.IsOnline ? "ordinary Fusion damage patch when network-owned" : "offline" });
+            }
+            var legacy = comp.GetType().GetMethod("TAKEDAMAGE", new[] { typeof(float) }) ?? comp.GetType().GetMethod("TakeDamage", new[] { typeof(float) });
+            if (legacy != null)
+            {
+                legacy.Invoke(comp, new object[] { amount });
+                return ToolResult.Success(c, new { component = comp.GetType().Name, method = legacy.Name, amount, synchronization = "local/legacy" });
+            }
+        }
         return ToolResult.Failure(c,"Target exposes no supported damage receiver.");
+    }
+    private ToolResult AttackTarget(ToolCall c)
+    {
+        var target = NeedObject(c);
+        var amount = c.Arguments["amount"]?.Value<float>() ?? 25f;
+        var preferred = HandName(c);
+        foreach (var handName in new[] { preferred, preferred == "left" ? "right" : "left" })
+        {
+            var hand = handName == "left" ? Player.LeftHand : Player.RightHand;
+            var held = hand == null ? null : HeldObject(hand);
+            var gun = held == null ? null : FindComponentByName(held, "Gun");
+            if (held == null || gun == null) continue;
+            held.transform.rotation = Quaternion.LookRotation(target.transform.position - held.transform.position, Vector3.up);
+            var fire = gun.GetType().GetMethod("Fire", Type.EmptyTypes) ?? throw new MissingMethodException("Gun.Fire");
+            var shots = Math.Clamp(c.Arguments["shots"]?.Value<int>() ?? 1, 1, 20);
+            for (var i = 0; i < shots; i++) fire.Invoke(gun, null);
+            return ToolResult.Success(c, new { mode = "held gun", hand = handName, shots, synchronization = _fusion.IsOnline ? "ordinary Fusion gun patch" : "offline" });
+        }
+        if (_fusion.TryGetPlayerId(target, out var smallId))
+        {
+            if (!_config.FusionSynchronization.Value) return ToolResult.Failure(c, "Fusion synchronization is disabled.");
+            var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
+            _fusion.DamagePlayer(smallId, amount, origin, target.transform.position - origin);
+            return ToolResult.Success(c, new { mode = "Fusion player damage", smallId, amount, synchronization = "PlayerSender.SendPlayerDamage" });
+        }
+        var result = DamageTarget(new ToolCall { Id = c.Id, Name = c.Name, Arguments = new JObject { ["objectId"] = Str(c, "objectId"), ["amount"] = amount } });
+        if (result.Result != "success") return result;
+        var body = target.GetComponentInChildren<Rigidbody>();
+        if (body != null)
+        {
+            var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
+            body.AddForce((target.transform.position - origin).normalized * Mathf.Clamp(amount * 0.2f, 2f, 20f), ForceMode.Impulse);
+        }
+        return ToolResult.Success(c, new { mode = "Marrow damage receiver", amount, impulse = body != null });
+    }
+    private ToolResult AttackFusionPlayer(ToolCall c)
+    {
+        if (!_config.FusionSynchronization.Value) return ToolResult.Failure(c, "Fusion synchronization is disabled.");
+        var player = ResolveFusionPlayer(c);
+        var amount = c.Arguments["amount"]?.Value<float>() ?? 25f;
+        var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
+        _fusion.DamagePlayer(player.SmallId, amount, origin, player.Position - origin);
+        return ToolResult.Success(c, new { player = player.Username, smallId = player.SmallId, amount, synchronization = "PlayerSender.SendPlayerDamage" });
     }
     private ToolResult MoveTo(ToolCall c){_moveDestination=Vec(c.Arguments["position"]);_followObject=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Success(c,new{started=true,destination=V(_moveDestination.Value)});}
     private ToolResult Follow(ToolCall c){NeedObject(c);_followObject=Str(c,"objectId");_moveDestination=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Success(c,new{started=true});}
@@ -205,9 +361,36 @@ public sealed class GameToolset
         if(_moveDestination is not Vector3 destination||Player.RigManager==null)return; var rig=Player.RigManager;var current=rig.transform.position;var flat=new Vector3(destination.x,current.y,destination.z);if(Vector3.Distance(current,flat)<0.15f){if(_followObject==null)_moveDestination=null;return;}var next=Vector3.MoveTowards(current,flat,_moveSpeed*Time.deltaTime);rig.Teleport(next,rig.transform.eulerAngles,true);
     }
 
-    private List<GameObject> NearbyObjects(float radius,int limit){var center=Player.Head?.transform.position??Vector3.zero;var seen=new HashSet<int>();var result=new List<GameObject>();foreach(var hit in Physics.OverlapSphere(center,Mathf.Clamp(radius,0.5f,50f))){var go=hit.attachedRigidbody?.gameObject??hit.gameObject;if(seen.Add(go.GetInstanceID()))result.Add(go);if(result.Count>=Math.Clamp(limit,1,500))break;}return result;}
+    private List<GameObject> NearbyObjects(float radius,int limit)
+    {
+        var center = Player.Head?.transform.position ?? Vector3.zero;
+        var seen = new HashSet<int>();
+        var result = new List<GameObject>();
+        foreach (var hit in Physics.OverlapSphere(center, Mathf.Clamp(radius, 0.5f, 50f)))
+        {
+            var go = CanonicalObject(hit);
+            if (seen.Add(go.GetInstanceID())) result.Add(go);
+        }
+        return result.OrderBy(x => Vector3.Distance(center, x.transform.position)).Take(Math.Clamp(limit, 1, 500)).ToList();
+    }
     private object[] CompactNearby(float radius,int limit)=>NearbyObjects(radius,limit).Select(x=>Describe(x)).ToArray();
-    private object Describe(GameObject go,bool detailed=false){var types=go.GetComponentsInChildren<Component>().Select(x=>x.GetType().Name).Distinct().Where(x=>detailed||new[]{"Rigidbody","Grip","Gun","PuppetMaster","Seat","ButtonNode","LeverNode","MarrowEntity"}.Contains(x)).Take(detailed?30:8).ToArray();var head=Player.Head?.transform.position??Vector3.zero;return new{id=_objects.Register(go),name=go.name,position=V(go.transform.position),distance=Math.Round(Vector3.Distance(head,go.transform.position),2),types};}
+    private object Describe(GameObject go,bool detailed=false){var types=go.GetComponentsInChildren<Component>().Select(x=>x.GetType().Name).Distinct().Where(x=>detailed||new[]{"Rigidbody","Grip","Gun","PuppetMaster","BehaviourBaseNav","AIBrain","Seat","ButtonNode","LeverNode","MarrowEntity","Poolee"}.Contains(x)).Take(detailed?30:10).ToArray();var head=Player.Head?.transform.position??Vector3.zero;return new{id=_objects.Register(go),name=go.name,position=V(go.transform.position),distance=Math.Round(Vector3.Distance(head,go.transform.position),2),kind=IsNpc(go)?"npc":_fusion.TryGetPlayerId(go,out _)?"fusionPlayer":IsInteractable(go)?"interactable":"object",types};}
+    private static GameObject CanonicalObject(Collider hit)
+    {
+        if (hit.attachedRigidbody != null) return hit.attachedRigidbody.gameObject;
+        var current = hit.transform;
+        GameObject best = hit.gameObject;
+        for (var depth = 0; current != null && depth < 8; depth++, current = current.parent)
+        {
+            var candidate = current.gameObject;
+            if (HasSemanticComponent(candidate)) return candidate;
+            if (!candidate.name.Contains("collider", StringComparison.OrdinalIgnoreCase) && !candidate.name.StartsWith("prop_static", StringComparison.OrdinalIgnoreCase)) best = candidate;
+        }
+        return best;
+    }
+    private static bool HasSemanticComponent(GameObject go) => go.GetComponents<Component>().Any(x => new[] { "MarrowEntity", "Poolee", "Grip", "Gun", "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Seat", "ButtonNode", "LeverNode" }.Contains(x.GetType().Name));
+    private static bool IsNpc(GameObject go) => go.GetComponentsInChildren<Component>().Any(x => new[] { "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Enemy_Health" }.Contains(x.GetType().Name));
+    private static bool IsInteractable(GameObject go) => go.GetComponentsInChildren<Component>().Any(x => new[] { "Grip", "Gun", "Seat", "ButtonNode", "LeverNode", "MarrowEntity" }.Contains(x.GetType().Name));
     private IEnumerable<(string title,string barcode,string source,string category,bool downloaded)> SpawnCatalog()=>_spawnLab.GetEntries().Select(x=>(x.Title,x.Barcode,x.Source,x.Category,x.Downloaded));
     private static int Score(string value,string query){if(string.IsNullOrWhiteSpace(query))return 0;value=value.ToLowerInvariant();query=query.ToLowerInvariant();if(value==query)return 0;if(value.Contains(query))return 1+value.IndexOf(query);return Levenshtein(value,query)+20;}
     private static int Levenshtein(string a,string b){var d=new int[b.Length+1];for(var j=0;j<=b.Length;j++)d[j]=j;for(var i=1;i<=a.Length;i++){var prev=d[0];d[0]=i;for(var j=1;j<=b.Length;j++){var old=d[j];d[j]=Math.Min(Math.Min(d[j]+1,d[j-1]+1),prev+(a[i-1]==b[j-1]?0:1));prev=old;}}return d[b.Length];}
@@ -220,6 +403,14 @@ public sealed class GameToolset
     private static Component? FindComponentByName(GameObject go,string name)=>go.GetComponentsInChildren<Component>().FirstOrDefault(x=>x.GetType().Name==name);
     private static string Str(ToolCall c,string key)=>c.Arguments[key]?.Value<string>()??throw new ArgumentException("Missing string argument: "+key);
     private static float Num(ToolCall c,string key)=>c.Arguments[key]?.Value<float>()??throw new ArgumentException("Missing numeric argument: "+key);
+    private static Attack CreateAttack(float amount, Vector3 origin, Vector3 direction) => new()
+    {
+        damage = Mathf.Max(0f, amount),
+        attackType = AttackType.Blunt,
+        origin = origin,
+        direction = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward,
+        normal = direction.sqrMagnitude > 0.0001f ? -direction.normalized : Vector3.back
+    };
     private static Vector3 Vec(JToken? token,Vector3? fallback=null)=>token==null?(fallback??throw new ArgumentException("Missing vector.")):new Vector3(token["x"]?.Value<float>()??0,token["y"]?.Value<float>()??0,token["z"]?.Value<float>()??0);
     private static object V(Vector3 v)=>new{x=Math.Round(v.x,3),y=Math.Round(v.y,3),z=Math.Round(v.z,3)};
     private static object? ReadMember(object? o,string name){if(o==null)return null;var t=o.GetType();return t.GetProperty(name)?.GetValue(o)??t.GetField(name)?.GetValue(o);}

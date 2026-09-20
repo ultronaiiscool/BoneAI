@@ -19,10 +19,26 @@ public sealed class AgentMenu
     {
         var page = Page.Root.CreatePage("AI Agent", Color.cyan);
         _prompt = page.CreateString("Prompt", Color.white, "Ask or command the agent", _ => { });
-        page.CreateFunction("Send", Color.green, () => _ = _mod.Conversation.SendAsync(_prompt?.Value ?? string.Empty));
+        page.CreateFunction("Send", Color.green, () =>
+        {
+            var text = _prompt?.Value ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (_prompt != null) _prompt.Value = string.Empty;
+            _ = _mod.Conversation.SendAsync(text);
+        });
         page.CreateFunction("Cancel Request", Color.yellow, _mod.Conversation.Cancel);
         page.CreateFunction("Reconnect", Color.cyan, () => _ = _mod.Conversation.ConnectAsync());
         page.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
+        page.CreateFunction("Enable All Game Controls", Color.green, () =>
+        {
+            _mod.Config.Enabled.Value = true;
+            _mod.Config.AllowActions.Value = true;
+            _mod.Config.AllowPlayerModification.Value = true;
+            _mod.Config.AllowSpawning.Value = true;
+            _mod.Config.AllowCombat.Value = true;
+            _mod.Config.FusionSynchronization.Value = true;
+            Notifier.Send(new Notification { Title = "AI Assistant", Message = "All game controls enabled.", ShowTitleOnPopup = true, PopupLength = 4, Type = NotificationType.Information });
+        });
         Bind(page, "Agent Enabled", _mod.Config.Enabled);
         Bind(page, "Allow Gameplay Actions", _mod.Config.AllowActions);
         Bind(page, "Allow Player Modification", _mod.Config.AllowPlayerModification);

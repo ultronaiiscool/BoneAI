@@ -1,4 +1,4 @@
-# BONELAB AI Agent 1.0.4
+# BONELAB AI Agent 1.1.0
 
 BONELAB AI Agent is a PCVR MelonLoader/BoneLib mod that connects BONELAB to the official local Codex App Server. It provides persistent conversational turns, streamed responses, structured game actions, permission controls, compact world perception, stable object handles, and optional use of Fusion's existing replication paths.
 
@@ -25,21 +25,21 @@ The WebSocket binds only to `127.0.0.1`. Authentication remains owned by the ins
 
 ## BoneMenu
 
-The menu contains prompt input, Send, Cancel Request, Reconnect, New Conversation, permission switches, Fusion synchronization preference, debug logging, connection status, current action, the latest response, and an in-headset response notification.
+The menu contains prompt input, Send, Cancel Request, Reconnect, New Conversation, a one-click **Enable All Game Controls** action, individual permission switches, Fusion synchronization preference, debug logging, connection status, current action, the latest response, and an in-headset response notification. Sending immediately clears the prompt field.
 
 ## Implemented structured tools
 
 The agent receives an explicit catalog rather than relying on an in-DLL natural-language command parser.
 
-- Player: state, position, rotation, avatar, held inventory, teleport, current health, heal, damage, avatar swap by barcode, runtime strength/grip/speed/agility/vitality overrides, restore overrides.
-- World: scene info, nearby compact object listing, fuzzy object search, detailed object inspection, stable per-session handles.
+- Player/avatar: state, position, rotation, avatar, held inventory, teleport, current health, heal, damage, complete installed Marrow avatar catalog search, fuzzy display-name avatar switching, runtime strength/grip/speed/agility/vitality overrides, restore overrides.
+- World: scene info, nearby compact semantic object listing, fuzzy object/NPC/interactable search, detailed object inspection, stable per-session handles.
 - Spawn: SpawnLab's full base-game/downloaded pallet catalog, fuzzy matching, refresh, Fusion-aware item/NPC/prop/vehicle spawning, pooled despawn.
 - Interaction: grip-aware grab, release, pull to hand, use/activate, button/lever/open/close dispatch when the target exposes a real public interaction entry point, push and throw.
 - Physics: force, impulse, velocity, physics position, physics rotation.
-- Combat: aim held item, fire real gun components, reload through the gun API, target damage when a real damage receiver is present, hit/punch/kick impulses.
+- Combat: high-level target attack, aim held item, fire real gun components, reload through the gun API, target damage when a real damage receiver is present, hit/punch/kick impulses, and direct Fusion player damage through Fusion's sender.
 - Movement: move/navigate to position, follow object, stop, turn, jump impulse.
 - Vehicle: enter a real Seat and exit the active Seat.
-- Fusion: session, host/client state, players, and synchronization report.
+- Fusion: session, host/client state, username/rig/position player discovery, stable player handles, synchronized avatar swap, synchronized remote-player damage, and synchronization report.
 - Diagnostics: loaded assemblies/mods, recent MelonLoader error lines, BoneLib headset notification.
 
 Every tool returns `success`, `failed`, or `cancelled`, an action ID, result data, and a failure reason when applicable. Missing/disappeared objects and unsupported interaction components fail explicitly. A request is limited to 12 action rounds and can be cancelled.
@@ -54,7 +54,8 @@ The mod does not claim that a local transform is networked. With Fusion 1.14.2 l
 | Grip/release | Marrow `Grip.Snatch` / `Hand.DetachObject` | No |
 | Gun fire | Real `Gun.Fire` path | No |
 | Seat enter/exit | Real `Seat` methods | No |
-| Avatar swap | `RigManager.SwapAvatarCrate` | No |
+| Avatar swap | Fusion online: `LocalAvatar.SwapAvatarCrate`; offline: `RigManager.SwapAvatarCrate` | No |
+| Remote-player damage | `PlayerSender.SendPlayerDamage` with a real Marrow `Attack` | No |
 | Networked prop physics | Real rigidbody/entity ownership path; final authority still belongs to Fusion | No |
 | NPC damage/death | Real target damage/puppet path when the component exposes it | No |
 
@@ -115,7 +116,7 @@ The supported Codex transport follows the official [Codex App Server documentati
 All 21 DLLs present in the target `Mods` folder were inventoried by assembly metadata and public type inspection. The agent uses or safely benefits from:
 
 - **SpawnLab 1.0.0:** direct private-entry bridge to its real catalog and spawn method. This is the sole spawn provider; it preserves SpawnLab's verified online/offline decision.
-- **LabFusion 1.14.2:** session/player inspection and existing replication patches.
+- **LabFusion 1.14.2:** exact `NetworkPlayer.Players`, `LocalAvatar.SwapAvatarCrate`, and `PlayerSender.SendPlayerDamage` integration plus ordinary replication patches.
 - **BoneLib 3.2.2:** player access, BoneMenu, notifications, and Marrow helpers.
 - **Force Pull Anything 1.0.0:** its automatic `Grip` patch makes agent grip actions compatible without a second integration.
 - **StrengthMod / Stat Changer:** their implementation confirmed the active avatar and rig multiplier fields used for runtime player controls. The agent does not rewrite either mod's saved settings.

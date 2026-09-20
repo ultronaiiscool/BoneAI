@@ -13,7 +13,7 @@ All DLLs in the target `Mods` directory were inventoried and their managed type 
 | FlappyLab.dll | 1.0.0 | Self-contained minigame; no general control API. |
 | Force Pull Anything.dll | 1.0.0 | Intended to patch every Grip with ForcePullGrip. The smoke test shows its old `SLZ.Interaction.Grip` reference fails on this game build, so the agent does not depend on it. |
 | ForeverMortal.dll | 2.0.1 | Health/death mod. Smoke test fails on an old BoneLib `OnLevelInitialized` method, so it is not integrated. |
-| LabFusion.dll | 1.14.2 | Used for session/player discovery. SpawnLab uses its real NetworkAssetSpawner; normal grips, guns, seats, avatars, NPCs, and pooled despawns retain Fusion patches. |
+| LabFusion.dll | 1.14.2 | Directly integrated through verified `NetworkPlayer.Players`, `LocalAvatar.SwapAvatarCrate`, and `PlayerSender.SendPlayerDamage` APIs. SpawnLab uses its real NetworkAssetSpawner; normal grips, guns, seats, NPCs, and pooled despawns retain Fusion patches. |
 | LaserEyes.dll | 0.0.0 | Combat effect. Smoke test reports an unstripping failure; not integrated. |
 | ModioModNetworker.dll | 2.8.1 | Observes Fusion spawn traffic and mod availability. It continues to work automatically; the AI is not given its downloader/filesystem surface. |
 | NoIntro.dll | 1.0.0 | Startup-only convenience; no agent capability. |
@@ -32,7 +32,7 @@ All DLLs in the target `Mods` directory were inventoried and their managed type 
 
 The compiled `BonelabAIAgent.dll` was installed and loaded in a hidden `-batchmode -nographics -quit` run. The log confirmed:
 
-- BONELAB AI Agent 1.0.3 is the current build; it includes Codex desktop discovery for game processes whose PATH omits Codex.
+- BONELAB AI Agent 1.1.0 is the current build; it includes Codex desktop discovery, full Marrow avatar-catalog search, direct Fusion avatar/player-damage paths, semantic world queries, high-level attacks, and prompt clearing.
 - Unity 2021.3.16f1 and BONELAB build 1.744.58126 detected.
 - Fusion 1.14.2 bridge detected.
 - SpawnLab 1.0.0 initialized.
