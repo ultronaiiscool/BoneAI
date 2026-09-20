@@ -1,4 +1,4 @@
-# BONELAB AI Agent 1.0.3
+# BONELAB AI Agent 1.0.4
 
 BONELAB AI Agent is a PCVR MelonLoader/BoneLib mod that connects BONELAB to the official local Codex App Server. It provides persistent conversational turns, streamed responses, structured game actions, permission controls, compact world perception, stable object handles, and optional use of Fusion's existing replication paths.
 

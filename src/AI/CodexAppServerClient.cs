@@ -31,7 +31,7 @@ public sealed class CodexAppServerClient : IDisposable
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "bonelab-ai-agent", ["title"] = "BONELAB AI Agent", ["version"] = "1.0.3" }
+            ["clientInfo"] = new JObject { ["name"] = "bonelab-ai-agent", ["title"] = "BONELAB AI Agent", ["version"] = "1.0.4" }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);
         StatusChanged?.Invoke("Connected");
