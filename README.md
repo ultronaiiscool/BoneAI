@@ -1,4 +1,4 @@
-# BONELAB AI Agent 1.0.0
+# BONELAB AI Agent 1.0.1
 
 BONELAB AI Agent is a PCVR MelonLoader/BoneLib mod that connects BONELAB to the official local Codex App Server. It provides persistent conversational turns, streamed responses, structured game actions, permission controls, compact world perception, stable object handles, and optional use of Fusion's existing replication paths.
 
@@ -17,11 +17,13 @@ The build was compiled directly against the assemblies from this exact installed
 1. Ensure MelonLoader 0.7.3 and BoneLib 3.2.2 are already installed.
 2. Copy `BonelabAIAgent.dll` into BONELAB's `Mods` folder.
 3. Sign into the Codex desktop app/CLI with your ChatGPT account. No API key or token is stored by this mod.
-4. Before starting BONELAB, right-click `Start-CodexBridge.ps1`, choose **Run with PowerShell**, and leave its window open. Equivalent command:
+4. Before starting BONELAB, run the Python bridge launcher and leave its window open:
 
-   ```powershell
-   codex app-server --listen ws://127.0.0.1:4500
+   ```console
+   python start_codex_bridge.py
    ```
+
+   The script uses only Python's standard library. It checks whether the server is already ready, locates the installed `codex` executable, validates the port, and starts `codex app-server --listen ws://127.0.0.1:4500`.
 
 5. Start BONELAB. Open **BoneMenu → AI Agent**, enter a prompt, then select **Send**.
 
@@ -76,7 +78,7 @@ Nearby-world scans occur only for context/tool requests, never every frame. Resu
 
 ## Troubleshooting
 
-- **Unavailable / connection refused:** run `Start-CodexBridge.ps1`; check `http://127.0.0.1:4500/readyz` locally.
+- **Unavailable / connection refused:** run `python start_codex_bridge.py`; check `http://127.0.0.1:4500/readyz` locally.
 - **No response:** verify Codex is signed in, select Reconnect, and inspect `MelonLoader/Latest.log` for `[AIAgent]`.
 - **Spawnable not found:** select SpawnLab's Refresh List once or ask the agent to use `spawn.refresh`, then use `spawn.list`. SpawnLab reads both base-game and downloaded pallet files.
 - **Object handle expired:** repeat the nearby search. Handles are intentionally invalidated when Unity destroys the object or changes level.

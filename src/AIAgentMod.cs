@@ -24,7 +24,7 @@ public sealed class AIAgentMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BONELAB AI Agent 1.0.0");
+        AgentLog.Info("Starting BONELAB AI Agent 1.0.1");
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
