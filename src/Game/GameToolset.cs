@@ -27,6 +27,7 @@ public sealed class GameToolset
     private Vector3? _moveDestination;
     private string? _followObject;
     private float _moveSpeed = 2.5f;
+    private bool _avatarCatalogLogged;
 
     public GameToolset(AgentConfig config, FusionBridge fusion) { _config = config; _fusion = fusion; }
 
@@ -357,6 +358,12 @@ public sealed class GameToolset
 
     public void Update()
     {
+        if (!_avatarCatalogLogged && AssetWarehouse.Instance?.InitialLoaded == true)
+        {
+            _avatarCatalogLogged = true;
+            try { AgentLog.Info($"Marrow avatar catalog ready with {AvatarCatalog().Count()} avatars."); }
+            catch (Exception ex) { AgentLog.Warn("Avatar catalog validation failed: " + ex.GetBaseException().Message); }
+        }
         _objects.Prune(); if(_followObject!=null&&_objects.TryGet(_followObject,out var target))_moveDestination=target.transform.position-target.transform.forward*1.5f;
         if(_moveDestination is not Vector3 destination||Player.RigManager==null)return; var rig=Player.RigManager;var current=rig.transform.position;var flat=new Vector3(destination.x,current.y,destination.z);if(Vector3.Distance(current,flat)<0.15f){if(_followObject==null)_moveDestination=null;return;}var next=Vector3.MoveTowards(current,flat,_moveSpeed*Time.deltaTime);rig.Teleport(next,rig.transform.eulerAngles,true);
     }
