@@ -32,7 +32,7 @@ All DLLs in the target `Mods` directory were inventoried and their managed type 
 
 The compiled `BonelabAIAgent.dll` was installed and loaded in a hidden `-batchmode -nographics -quit` run. The log confirmed:
 
-- BONELAB AI Agent 1.0.2 is the current build; the original 1.0.0 load test registered successfully before automatic Python bridge startup was added.
+- BONELAB AI Agent 1.0.3 is the current build; it includes Codex desktop discovery for game processes whose PATH omits Codex.
 - Unity 2021.3.16f1 and BONELAB build 1.744.58126 detected.
 - Fusion 1.14.2 bridge detected.
 - SpawnLab 1.0.0 initialized.

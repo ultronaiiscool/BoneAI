@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -36,18 +37,21 @@ def main() -> int:
         print(f"Codex App Server is already ready on 127.0.0.1:{args.port}.")
         return 0
 
-    codex = shutil.which("codex")
+    codex = find_codex()
     if codex is None:
         print(
-            "Codex was not found on PATH. Install/open the Codex desktop app and sign in, "
-            "then run this script again.",
+            "Codex was not found on PATH or in the Codex desktop installation under "
+            "%LOCALAPPDATA%\\OpenAI\\Codex\\bin. Install/open Codex and sign in, "
+            "then start BONELAB again.",
             file=sys.stderr,
+            flush=True,
         )
         return 1
 
     endpoint = f"ws://127.0.0.1:{args.port}"
-    print(f"Starting the official Codex App Server at {endpoint}")
-    print("Keep this window open while using BONELAB AI Agent. Press Ctrl+C to stop.")
+    print(f"Using Codex executable: {codex}", flush=True)
+    print(f"Starting the official Codex App Server at {endpoint}", flush=True)
+    print("Keep this window open while using BONELAB AI Agent. Press Ctrl+C to stop.", flush=True)
 
     try:
         process = subprocess.Popen([codex, "app-server", "--listen", endpoint])
@@ -91,6 +95,32 @@ def parent_is_running(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def find_codex() -> str | None:
+    on_path = shutil.which("codex") or shutil.which("codex.exe")
+    if on_path:
+        return on_path
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+
+    roots = [
+        Path(local_app_data) / "OpenAI" / "Codex" / "bin",
+        Path(local_app_data) / "Programs" / "OpenAI Codex",
+        Path(local_app_data) / "Programs" / "Codex",
+    ]
+    candidates: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        candidates.extend(path for path in root.glob("**/codex.exe") if path.is_file())
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return str(candidates[0])
 
 
 if __name__ == "__main__":

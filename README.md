@@ -1,4 +1,4 @@
-# BONELAB AI Agent 1.0.2
+# BONELAB AI Agent 1.0.3
 
 BONELAB AI Agent is a PCVR MelonLoader/BoneLib mod that connects BONELAB to the official local Codex App Server. It provides persistent conversational turns, streamed responses, structured game actions, permission controls, compact world perception, stable object handles, and optional use of Fusion's existing replication paths.
 
@@ -19,7 +19,7 @@ The build was compiled directly against the assemblies from this exact installed
 3. Sign into the Codex desktop app/CLI with your ChatGPT account. No API key or token is stored by this mod.
 4. Start BONELAB. The DLL checks `127.0.0.1:4500`, automatically launches the adjacent Python script in a hidden process when needed, waits for readiness, and then connects. Open **BoneMenu → AI Agent**, enter a prompt, then select **Send**.
 
-The script uses only Python's standard library. The DLL supplies a fixed port and BONELAB parent PID; the script locates the installed `codex` executable and starts `codex app-server --listen ws://127.0.0.1:4500`. The child process is stopped when the owning BONELAB process exits. Disable **Auto-start Python Bridge** in BoneMenu or set `AutoStartPythonBridge=false` in MelonPreferences to manage it manually.
+The script uses only Python's standard library. The DLL supplies a fixed port and BONELAB parent PID. The script first searches `PATH`, then the Codex desktop installation under `%LOCALAPPDATA%\\OpenAI\\Codex\\bin`, and starts `codex app-server --listen ws://127.0.0.1:4500`. The child process is stopped when the owning BONELAB process exits. Disable **Auto-start Python Bridge** in BoneMenu or set `AutoStartPythonBridge=false` in MelonPreferences to manage it manually.
 
 The WebSocket binds only to `127.0.0.1`. Authentication remains owned by the installed Codex client. The mod does not read, receive, store, or log credentials.
 
