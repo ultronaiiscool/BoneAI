@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +26,7 @@ def main() -> int:
         description="Start the localhost-only Codex App Server used by BONELAB AI Agent."
     )
     parser.add_argument("--port", type=int, default=4500)
+    parser.add_argument("--parent-pid", type=int, default=0, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if not 1 <= args.port <= 65535:
@@ -47,14 +50,42 @@ def main() -> int:
     print("Keep this window open while using BONELAB AI Agent. Press Ctrl+C to stop.")
 
     try:
-        completed = subprocess.run(
-            [codex, "app-server", "--listen", endpoint],
-            check=False,
-        )
-        return completed.returncode
+        process = subprocess.Popen([codex, "app-server", "--listen", endpoint])
+        while process.poll() is None:
+            if args.parent_pid and not parent_is_running(args.parent_pid):
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                return 0
+            try:
+                process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                pass
+        return process.returncode or 0
     except KeyboardInterrupt:
         print("\nCodex App Server stopped.")
         return 0
+
+
+def parent_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return True
+    if os.name == "nt":
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, pid
+        )
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 if __name__ == "__main__":

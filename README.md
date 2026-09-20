@@ -1,4 +1,4 @@
-# BONELAB AI Agent 1.0.1
+# BONELAB AI Agent 1.0.2
 
 BONELAB AI Agent is a PCVR MelonLoader/BoneLib mod that connects BONELAB to the official local Codex App Server. It provides persistent conversational turns, streamed responses, structured game actions, permission controls, compact world perception, stable object handles, and optional use of Fusion's existing replication paths.
 
@@ -15,17 +15,11 @@ The build was compiled directly against the assemblies from this exact installed
 ## Install and run
 
 1. Ensure MelonLoader 0.7.3 and BoneLib 3.2.2 are already installed.
-2. Copy `BonelabAIAgent.dll` into BONELAB's `Mods` folder.
+2. Copy both `BonelabAIAgent.dll` and `start_codex_bridge.py` into BONELAB's `Mods` folder. They must remain beside one another.
 3. Sign into the Codex desktop app/CLI with your ChatGPT account. No API key or token is stored by this mod.
-4. Before starting BONELAB, run the Python bridge launcher and leave its window open:
+4. Start BONELAB. The DLL checks `127.0.0.1:4500`, automatically launches the adjacent Python script in a hidden process when needed, waits for readiness, and then connects. Open **BoneMenu → AI Agent**, enter a prompt, then select **Send**.
 
-   ```console
-   python start_codex_bridge.py
-   ```
-
-   The script uses only Python's standard library. It checks whether the server is already ready, locates the installed `codex` executable, validates the port, and starts `codex app-server --listen ws://127.0.0.1:4500`.
-
-5. Start BONELAB. Open **BoneMenu → AI Agent**, enter a prompt, then select **Send**.
+The script uses only Python's standard library. The DLL supplies a fixed port and BONELAB parent PID; the script locates the installed `codex` executable and starts `codex app-server --listen ws://127.0.0.1:4500`. The child process is stopped when the owning BONELAB process exits. Disable **Auto-start Python Bridge** in BoneMenu or set `AutoStartPythonBridge=false` in MelonPreferences to manage it manually.
 
 The WebSocket binds only to `127.0.0.1`. Authentication remains owned by the installed Codex client. The mod does not read, receive, store, or log credentials.
 
@@ -68,7 +62,7 @@ Local health, strength, speed, agility, vitality, Codex conversation state, UI, 
 
 ## Safety and prompt injection
 
-Only text submitted through the local AI Agent prompt authorizes actions. Player names, server names, object names, map text, mod descriptions, logs, and other world data are labeled untrusted context. The action dispatcher exposes only its registered BONELAB tools. It exposes no shell, process execution, arbitrary file writes/deletion, credential access, DLL loading, or general network-request tool.
+Only text submitted through the local AI Agent prompt authorizes actions. Player names, server names, object names, map text, mod descriptions, logs, and other world data are labeled untrusted context. The action dispatcher exposes only its registered BONELAB tools. It exposes no shell, process execution, arbitrary file writes/deletion, credential access, DLL loading, or general network-request tool. Startup may execute only the fixed adjacent `start_codex_bridge.py` file; its path and arguments cannot be controlled by AI prompts.
 
 The log reader is fixed to `MelonLoader/Latest.log`. The Codex endpoint defaults to localhost. Never change it to an untrusted remote server.
 
@@ -78,7 +72,7 @@ Nearby-world scans occur only for context/tool requests, never every frame. Resu
 
 ## Troubleshooting
 
-- **Unavailable / connection refused:** run `python start_codex_bridge.py`; check `http://127.0.0.1:4500/readyz` locally.
+- **Unavailable / connection refused:** confirm Python and Codex are on `PATH`, confirm `start_codex_bridge.py` is beside the DLL, and inspect `[AIAgent] Python bridge` lines. You can also check `http://127.0.0.1:4500/readyz` locally.
 - **No response:** verify Codex is signed in, select Reconnect, and inspect `MelonLoader/Latest.log` for `[AIAgent]`.
 - **Spawnable not found:** select SpawnLab's Refresh List once or ask the agent to use `spawn.refresh`, then use `spawn.list`. SpawnLab reads both base-game and downloaded pallet files.
 - **Object handle expired:** repeat the nearby search. Handles are intentionally invalidated when Unity destroys the object or changes level.

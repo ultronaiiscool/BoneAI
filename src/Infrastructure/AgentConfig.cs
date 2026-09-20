@@ -17,6 +17,7 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<float> WorldQueryRadius { get; }
     public MelonPreferences_Entry<int> WorldQueryLimit { get; }
     public MelonPreferences_Entry<string> ConversationThreadId { get; }
+    public MelonPreferences_Entry<bool> AutoStartPythonBridge { get; }
 
     public AgentConfig()
     {
@@ -34,5 +35,6 @@ public sealed class AgentConfig
         WorldQueryRadius = category.CreateEntry("WorldQueryRadius", 12f);
         WorldQueryLimit = category.CreateEntry("WorldQueryLimit", 40);
         ConversationThreadId = category.CreateEntry("CodexThreadId", string.Empty);
+        AutoStartPythonBridge = category.CreateEntry("AutoStartPythonBridge", true);
     }
 }

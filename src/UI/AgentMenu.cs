@@ -30,6 +30,7 @@ public sealed class AgentMenu
         Bind(page, "Allow Combat Actions", _mod.Config.AllowCombat);
         Bind(page, "Fusion Synchronization", _mod.Config.FusionSynchronization);
         Bind(page, "Show Agent Activity", _mod.Config.ShowActivity);
+        Bind(page, "Auto-start Python Bridge", _mod.Config.AutoStartPythonBridge);
         Bind(page, "Debug Logging", _mod.Config.DebugLogging, value => Infrastructure.AgentLog.Verbose = value);
         _status = page.CreateString("Connection Status", Color.gray, "Starting", _ => { });
         _activity = page.CreateString("Current Action", Color.gray, "Idle", _ => { });

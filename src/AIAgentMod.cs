@@ -18,13 +18,14 @@ public sealed class AIAgentMod : MelonMod
     public FusionBridge Fusion { get; private set; } = null!;
     public ConversationManager Conversation { get; private set; } = null!;
     public AgentMenu Menu { get; private set; } = null!;
+    public PythonBridgeManager PythonBridge { get; private set; } = null!;
 
     public override void OnInitializeMelon()
     {
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BONELAB AI Agent 1.0.1");
+        AgentLog.Info("Starting BONELAB AI Agent 1.0.2");
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -33,9 +34,10 @@ public sealed class AIAgentMod : MelonMod
         Game = new GameToolset(Config, Fusion);
         Game.RegisterTools(Tools);
         Conversation = new ConversationManager(Config, Tools, Game);
+        PythonBridge = new PythonBridgeManager();
         Menu = new AgentMenu(this);
         Menu.Create();
-        _ = Conversation.ConnectAsync();
+        _ = StartBackendAsync();
     }
 
     public override void OnUpdate()
@@ -49,5 +51,18 @@ public sealed class AIAgentMod : MelonMod
     {
         try { Conversation.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("shutdown", ex); }
+        try { PythonBridge.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("Python bridge shutdown", ex); }
+    }
+
+    private async Task StartBackendAsync()
+    {
+        try
+        {
+            await PythonBridge.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartPythonBridge.Value).ConfigureAwait(false);
+            await Conversation.ConnectAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { AgentLog.Exception("backend startup", ex); }
     }
 }
