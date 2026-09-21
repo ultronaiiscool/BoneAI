@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
-using BonelabAIAgent.Infrastructure;
-using BonelabAIAgent.Tools;
+using BoneAI.Infrastructure;
+using BoneAI.Tools;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace BonelabAIAgent.AI;
+namespace BoneAI.AI;
 
 public sealed class CodexAppServerClient : IDisposable
 {
@@ -40,7 +40,7 @@ public sealed class CodexAppServerClient : IDisposable
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "bonelab-ai-agent", ["title"] = "BONELAB AI Agent", ["version"] = "2.0.0" },
+            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.1.0" },
             ["capabilities"] = new JObject { ["experimentalApi"] = true }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);

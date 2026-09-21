@@ -1,9 +1,9 @@
 using System.Collections;
 using System.Reflection;
-using BonelabAIAgent.Infrastructure;
+using BoneAI.Infrastructure;
 using MelonLoader;
 
-namespace BonelabAIAgent.Game;
+namespace BoneAI.Game;
 
 public sealed class SpawnLabBridge
 {

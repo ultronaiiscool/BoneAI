@@ -1,6 +1,6 @@
-using BonelabAIAgent.Tools;
+using BoneAI.Tools;
 
-namespace BonelabAIAgent.AI;
+namespace BoneAI.AI;
 
 public sealed class StructuredReply
 {

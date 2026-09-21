@@ -3,7 +3,7 @@ using System.Reflection;
 using System.Net;
 using System.Net.Http;
 
-namespace BonelabAIAgent.Infrastructure;
+namespace BoneAI.Infrastructure;
 
 public sealed class PythonBridgeManager : IDisposable
 {
@@ -38,7 +38,7 @@ public sealed class PythonBridgeManager : IDisposable
 
         var modDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
                            ?? AppDomain.CurrentDomain.BaseDirectory;
-        var script = Path.Combine(modDirectory, "start_codex_bridge.py");
+        var script = Path.Combine(modDirectory, "start_boneai_bridge.py");
         if (!File.Exists(script))
         {
             Status = $"Python bridge script is missing beside the DLL: {script}";

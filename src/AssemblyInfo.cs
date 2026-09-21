@@ -1,6 +1,6 @@
 using MelonLoader;
-using BonelabAIAgent;
+using BoneAI;
 
-[assembly: MelonInfo(typeof(AIAgentMod), "BONELAB AI Agent", "2.0.0", "OpenAI Community")]
+[assembly: MelonInfo(typeof(BoneAIMod), "BoneAI", "2.1.0", "BoneAI Community")]
 [assembly: MelonGame("Stress Level Zero", "BONELAB")]
 [assembly: MelonOptionalDependencies("LabFusion")]

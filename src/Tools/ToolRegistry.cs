@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
-using BonelabAIAgent.Infrastructure;
+using BoneAI.Infrastructure;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace BonelabAIAgent.Tools;
+namespace BoneAI.Tools;
 
 public sealed class ToolRegistry
 {

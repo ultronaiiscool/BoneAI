@@ -2,22 +2,22 @@ using BoneLib.BoneMenu;
 using BoneLib.Notifications;
 using UnityEngine;
 
-namespace BonelabAIAgent.UI;
+namespace BoneAI.UI;
 
 public sealed class AgentMenu
 {
-    private readonly AIAgentMod _mod;
+    private readonly BoneAIMod _mod;
     private StringElement? _prompt;
     private StringElement? _status;
     private StringElement? _activity;
     private StringElement? _response;
     private float _nextRefresh;
 
-    public AgentMenu(AIAgentMod mod) => _mod = mod;
+    public AgentMenu(BoneAIMod mod) => _mod = mod;
 
     public void Create()
     {
-        var page = Page.Root.CreatePage("AI Agent", Color.cyan);
+        var page = Page.Root.CreatePage("BoneAI", Color.cyan);
         _prompt = page.CreateString("Prompt", Color.white, "Ask or command the agent", _ => { });
         page.CreateFunction("Send", Color.green, () =>
         {
@@ -37,7 +37,7 @@ public sealed class AgentMenu
             _mod.Config.AllowSpawning.Value = true;
             _mod.Config.AllowCombat.Value = true;
             _mod.Config.FusionSynchronization.Value = true;
-            Notifier.Send(new Notification { Title = "AI Assistant", Message = "All game controls enabled.", ShowTitleOnPopup = true, PopupLength = 4, Type = NotificationType.Information });
+            Notifier.Send(new Notification { Title = "BoneAI", Message = "All game controls enabled.", ShowTitleOnPopup = true, PopupLength = 4, Type = NotificationType.Information });
         });
         Bind(page, "Agent Enabled", _mod.Config.Enabled);
         Bind(page, "Allow Gameplay Actions", _mod.Config.AllowActions);
@@ -53,7 +53,7 @@ public sealed class AgentMenu
         _response = page.CreateString("Last Response", Color.white, "None", _ => { });
         page.CreateFunction("Show Last Response", Color.white, () =>
         {
-            Notifier.Send(new Notification { Title = "AI Assistant", Message = Trim(_mod.Conversation.LastResponse, 480), ShowTitleOnPopup = true, PopupLength = 8, Type = NotificationType.Information });
+            Notifier.Send(new Notification { Title = "BoneAI", Message = Trim(_mod.Conversation.LastResponse, 480), ShowTitleOnPopup = true, PopupLength = 8, Type = NotificationType.Information });
         });
     }
 

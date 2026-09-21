@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace BonelabAIAgent.Infrastructure;
+namespace BoneAI.Infrastructure;
 
 public sealed class MainThreadDispatcher
 {

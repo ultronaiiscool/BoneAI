@@ -1,10 +1,10 @@
-using BonelabAIAgent.Game;
-using BonelabAIAgent.Infrastructure;
-using BonelabAIAgent.Tools;
+using BoneAI.Game;
+using BoneAI.Infrastructure;
+using BoneAI.Tools;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace BonelabAIAgent.AI;
+namespace BoneAI.AI;
 
 public sealed class ConversationManager : IDisposable
 {

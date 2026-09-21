@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the official Codex App Server for BONELAB AI Agent."""
+"""Start the official Codex App Server for BoneAI."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def is_ready(port: int) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Start the localhost-only Codex App Server used by BONELAB AI Agent."
+        description="Start the localhost-only Codex App Server used by BoneAI."
     )
     parser.add_argument("--port", type=int, default=4500)
     parser.add_argument("--parent-pid", type=int, default=0, help=argparse.SUPPRESS)
@@ -51,7 +51,7 @@ def main() -> int:
     endpoint = f"ws://127.0.0.1:{args.port}"
     print(f"Using Codex executable: {codex}", flush=True)
     print(f"Starting the official Codex App Server at {endpoint}", flush=True)
-    print("Keep this window open while using BONELAB AI Agent. Press Ctrl+C to stop.", flush=True)
+    print("BoneAI bridge is ready. Keep this window open while playing BONELAB.", flush=True)
 
     try:
         process = subprocess.Popen([codex, "app-server", "--listen", endpoint])

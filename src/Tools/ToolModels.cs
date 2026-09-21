@@ -1,6 +1,6 @@
 using Newtonsoft.Json.Linq;
 
-namespace BonelabAIAgent.Tools;
+namespace BoneAI.Tools;
 
 public enum AgentActionState { Queued, Validating, Executing, WaitingForNetwork, Succeeded, Failed, Cancelled }
 

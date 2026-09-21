@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace BonelabAIAgent.Catalogs;
+namespace BoneAI.Catalogs;
 
 public sealed record AvatarCatalogItem(string Title, string Barcode, string Source, string Provider);
 

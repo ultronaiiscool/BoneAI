@@ -1,11 +1,11 @@
 using System.Collections;
 using System.Reflection;
-using BonelabAIAgent.Infrastructure;
+using BoneAI.Infrastructure;
 using Il2CppSLZ.Marrow.Combat;
 using Il2CppSLZ.Marrow.Data;
 using UnityEngine;
 
-namespace BonelabAIAgent.Fusion;
+namespace BoneAI.Fusion;
 
 public sealed class FusionBridge
 {

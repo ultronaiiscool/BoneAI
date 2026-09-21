@@ -4,8 +4,8 @@
     <LangVersion>10</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>BonelabAIAgent.Catalogs</AssemblyName>
-    <RootNamespace>BonelabAIAgent.Catalogs</RootNamespace>
-    <Version>2.0.0</Version>
+    <AssemblyName>BoneAI.Catalogs</AssemblyName>
+    <RootNamespace>BoneAI.Catalogs</RootNamespace>
+    <Version>2.1.0</Version>
   </PropertyGroup>
 </Project>

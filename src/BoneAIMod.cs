@@ -1,16 +1,16 @@
-using BonelabAIAgent.AI;
-using BonelabAIAgent.Fusion;
-using BonelabAIAgent.Game;
-using BonelabAIAgent.Infrastructure;
-using BonelabAIAgent.Tools;
-using BonelabAIAgent.UI;
+using BoneAI.AI;
+using BoneAI.Fusion;
+using BoneAI.Game;
+using BoneAI.Infrastructure;
+using BoneAI.Tools;
+using BoneAI.UI;
 using MelonLoader;
 
-namespace BonelabAIAgent;
+namespace BoneAI;
 
-public sealed class AIAgentMod : MelonMod
+public sealed class BoneAIMod : MelonMod
 {
-    public static AIAgentMod Instance { get; private set; } = null!;
+    public static BoneAIMod Instance { get; private set; } = null!;
     public AgentConfig Config { get; private set; } = null!;
     public MainThreadDispatcher Dispatcher { get; } = new();
     public ToolRegistry Tools { get; private set; } = null!;
@@ -25,7 +25,7 @@ public sealed class AIAgentMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BONELAB AI Agent 2.0.0");
+        AgentLog.Info("Starting BoneAI 2.1.0");
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();

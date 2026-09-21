@@ -1,10 +1,10 @@
 using System.Reflection;
 using BoneLib;
 using BoneLib.Notifications;
-using BonelabAIAgent.Catalogs;
-using BonelabAIAgent.Fusion;
-using BonelabAIAgent.Infrastructure;
-using BonelabAIAgent.Tools;
+using BoneAI.Catalogs;
+using BoneAI.Fusion;
+using BoneAI.Infrastructure;
+using BoneAI.Tools;
 using Il2CppSLZ.Marrow;
 using Il2CppSLZ.Marrow.Combat;
 using Il2CppSLZ.Marrow.Data;
@@ -14,7 +14,7 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace BonelabAIAgent.Game;
+namespace BoneAI.Game;
 
 public sealed class GameToolset
 {
@@ -501,11 +501,11 @@ public sealed class GameToolset
             new{name="Echolocation",loaded=Has("Echolocation"),usable=false,integration="internal perception cache is non-public; Fusion players queried directly"},
             new{name="ModioModNetworker",loaded=Has("ModioModNetworker"),usable=true,integration="automatically observes Fusion spawn traffic; no direct calls required"},
             new{name="WristHub",loaded=Has("WristHub.Core"),usable=true,integration="verified avatar index is used as the primary installed-avatar catalog; unrelated UI/system controls remain isolated"},
-            new{name="BonelabAIAgent.Catalogs",loaded=Has("BonelabAIAgent.Catalogs"),usable=true,integration="V2 companion provider scans WristHub and installed pallet manifests"}
+            new{name="BoneAI.Catalogs",loaded=Has("BoneAI.Catalogs"),usable=true,integration="Companion provider scans WristHub and installed pallet manifests"}
         });
     }
     private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=c.Arguments["limit"]?.Value<int>()??40;var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).ToArray();return ToolResult.Success(c,lines);}
-    private ToolResult Notify(ToolCall c){Notifier.Send(new Notification{Title="BONELAB AI Agent",Message=Str(c,"message"),ShowTitleOnPopup=true,Type=NotificationType.Information,PopupLength=4});return ToolResult.Success(c);}
+    private ToolResult Notify(ToolCall c){Notifier.Send(new Notification{Title="BoneAI",Message=Str(c,"message"),ShowTitleOnPopup=true,Type=NotificationType.Information,PopupLength=4});return ToolResult.Success(c);}
 
     public void Update()
     {

@@ -1,6 +1,6 @@
 using MelonLoader;
 
-namespace BonelabAIAgent.Infrastructure;
+namespace BoneAI.Infrastructure;
 
 public sealed class AgentConfig
 {
@@ -21,7 +21,7 @@ public sealed class AgentConfig
 
     public AgentConfig()
     {
-        var category = MelonPreferences.CreateCategory("BonelabAIAgent");
+        var category = MelonPreferences.CreateCategory("BoneAI");
         Enabled = category.CreateEntry("Enabled", true);
         AllowActions = category.CreateEntry("AllowGameplayActions", true);
         AllowPlayerModification = category.CreateEntry("AllowPlayerModification", true);

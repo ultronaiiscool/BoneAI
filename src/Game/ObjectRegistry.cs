@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace BonelabAIAgent.Game;
+namespace BoneAI.Game;
 
 public sealed class ObjectRegistry
 {
