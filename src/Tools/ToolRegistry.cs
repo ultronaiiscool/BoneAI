@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using BonelabAIAgent.Infrastructure;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace BonelabAIAgent.Tools;
 
@@ -10,6 +11,7 @@ public sealed class ToolRegistry
     private readonly Dictionary<string, string> _descriptions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ActionRecord> _actions = new();
     private readonly MainThreadDispatcher _dispatcher;
+    public event Action<string>? ActionChanged;
 
     public ToolRegistry(MainThreadDispatcher dispatcher) => _dispatcher = dispatcher;
 
@@ -30,6 +32,7 @@ public sealed class ToolRegistry
         try
         {
             record.State = AgentActionState.Executing;
+            ActionChanged?.Invoke(call.Name);
             AgentLog.Info($"Tool request {call.Name} ({call.Id})");
             return Finish(await _dispatcher.InvokeAsync(() => handler(call)).WaitAsync(cancellationToken));
         }
@@ -48,11 +51,42 @@ public sealed class ToolRegistry
             record.State = result.State;
             record.Error = result.Reason;
             record.FinishedUtc = DateTime.UtcNow;
+            ActionChanged?.Invoke("Idle");
             return result;
         }
     }
 
     public IReadOnlyCollection<ActionRecord> RecentActions => _actions.Values.OrderByDescending(x => x.StartedUtc).Take(20).ToArray();
 
+    public Task<T> OnGameThreadAsync<T>(Func<T> action) => _dispatcher.InvokeAsync(action);
+
     public string BuildCatalogJson() => JsonConvert.SerializeObject(_descriptions.Select(x => new { name = x.Key, description = x.Value }), Formatting.None);
+
+    public JArray BuildDynamicTools()
+    {
+        var tools = new JArray();
+        foreach (var group in _descriptions.OrderBy(x => x.Key).GroupBy(x => x.Key.Split('.')[0], StringComparer.OrdinalIgnoreCase))
+        {
+            var members = new JArray();
+            foreach (var entry in group)
+            {
+                var separator = entry.Key.IndexOf('.');
+                members.Add(new JObject
+                {
+                    ["type"] = "function",
+                    ["name"] = separator < 0 ? entry.Key : entry.Key[(separator + 1)..],
+                    ["description"] = entry.Value,
+                    ["inputSchema"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                });
+            }
+            tools.Add(new JObject
+            {
+                ["type"] = "namespace",
+                ["name"] = group.Key,
+                ["description"] = $"BONELAB {group.Key} tools. These execute only inside the game and return authoritative results.",
+                ["tools"] = members
+            });
+        }
+        return tools;
+    }
 }

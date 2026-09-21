@@ -19,7 +19,10 @@ public sealed class FusionBridge
     private Type? _localAvatar;
 
     public bool IsAvailable => _assembly != null;
-    public bool IsOnline => _networkInfo != null && ReadStatic<bool>(_networkInfo, "HasServer");
+    public bool IsOnline
+    {
+        get { try { return _networkInfo != null && ReadStatic<bool>(_networkInfo, "HasServer"); } catch { return false; } }
+    }
 
     public void Initialize()
     {
@@ -50,23 +53,36 @@ public sealed class FusionBridge
             return output;
         foreach (var player in players)
         {
-            if (player == null) continue;
-            var type = player.GetType();
-            var id = type.GetProperty("PlayerID")?.GetValue(player);
-            if (id == null) continue;
-            var rigRefs = type.GetProperty("RigRefs")?.GetValue(player);
-            var rig = rigRefs?.GetType().GetProperty("RigManager")?.GetValue(rigRefs);
-            var gameObject = rig?.GetType().GetProperty("gameObject")?.GetValue(rig) as GameObject;
-            var position = gameObject?.transform.position ?? Vector3.zero;
-            var smallId = Read<byte>(id, id.GetType(), "SmallID");
-            output.Add(new PlayerSnapshot(
-                smallId,
-                Read<ulong>(id, id.GetType(), "PlatformID"),
-                type.GetProperty("Username")?.GetValue(player)?.ToString() ?? $"Player {smallId}",
-                Read<bool>(id, id.GetType(), "IsHost"),
-                Read<bool>(id, id.GetType(), "IsMe"),
-                gameObject,
-                position));
+            try
+            {
+                if (player == null) continue;
+                var type = player.GetType();
+                var id = type.GetProperty("PlayerID")?.GetValue(player);
+                if (id == null) continue;
+                var rigRefs = type.GetProperty("RigRefs")?.GetValue(player);
+                var rig = rigRefs?.GetType().GetProperty("RigManager")?.GetValue(rigRefs);
+                GameObject? gameObject = null;
+                Vector3 position = Vector3.zero;
+                try
+                {
+                    gameObject = rig?.GetType().GetProperty("gameObject")?.GetValue(rig) as GameObject;
+                    if (gameObject != null) position = gameObject.transform.position;
+                }
+                catch { gameObject = null; }
+                var smallId = Read<byte>(id, id.GetType(), "SmallID");
+                output.Add(new PlayerSnapshot(
+                    smallId,
+                    Read<ulong>(id, id.GetType(), "PlatformID"),
+                    SafeText(type.GetProperty("Username"), player) ?? $"Player {smallId}",
+                    Read<bool>(id, id.GetType(), "IsHost"),
+                    Read<bool>(id, id.GetType(), "IsMe"),
+                    gameObject,
+                    position));
+            }
+            catch (Exception ex)
+            {
+                AgentLog.Debug("Skipped stale Fusion player during rig transition: " + ex.GetBaseException().Message);
+            }
         }
         return output;
     }
@@ -146,5 +162,11 @@ public sealed class FusionBridge
         if (property?.GetValue(target) is T pv) return pv;
         var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         return field?.GetValue(target) is T fv ? fv : default!;
+    }
+
+    private static string? SafeText(PropertyInfo? property, object target)
+    {
+        try { return property?.GetValue(target)?.ToString(); }
+        catch { return null; }
     }
 }
