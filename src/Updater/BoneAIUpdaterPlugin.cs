@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using MelonLoader;
@@ -13,7 +14,15 @@ public sealed class BoneAIUpdaterPlugin : MelonPlugin
     private string? _pendingZip;
     private string? _pendingHash;
 
-    public override void OnApplicationStarted() => _ = CheckAsync();
+    public override void OnApplicationStarted()
+    {
+        if (IsManagedModProfileInstall())
+        {
+            MelonLogger.Msg("Thunderstore/r2modman profile install detected; updates are managed by the mod manager.");
+            return;
+        }
+        _ = CheckAsync();
+    }
 
     private async Task CheckAsync()
     {
@@ -57,13 +66,14 @@ public sealed class BoneAIUpdaterPlugin : MelonPlugin
     public override void OnApplicationQuit()
     {
         if (_pendingZip == null || _pendingHash == null) return;
-        var script = Path.Combine(MelonEnvironment.ModsDirectory, "start_boneai_bridge.py");
+        var modDirectory = MainModDirectory();
+        var script = Path.Combine(modDirectory, "start_boneai_bridge.py");
         if (!File.Exists(script)) { MelonLogger.Warning("Cannot apply BoneAI update: bridge helper is missing."); return; }
         foreach (var candidate in new[] { "python.exe", "python", "py.exe" })
         {
             try
             {
-                var info = new ProcessStartInfo { FileName = candidate, UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = MelonEnvironment.ModsDirectory };
+                var info = new ProcessStartInfo { FileName = candidate, UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = modDirectory };
                 if (candidate == "py.exe") info.ArgumentList.Add("-3");
                 info.ArgumentList.Add(script); info.ArgumentList.Add("--install-update"); info.ArgumentList.Add(_pendingZip);
                 info.ArgumentList.Add("--expected-sha256"); info.ArgumentList.Add(_pendingHash);
@@ -74,5 +84,18 @@ public sealed class BoneAIUpdaterPlugin : MelonPlugin
             catch { }
         }
         MelonLogger.Warning("Could not launch Python to apply the downloaded BoneAI update.");
+    }
+
+    private static string MainModDirectory()
+    {
+        var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.GetName().Name == "BoneAI");
+        return assembly == null ? MelonEnvironment.ModsDirectory : Path.GetDirectoryName(assembly.Location) ?? MelonEnvironment.ModsDirectory;
+    }
+
+    private static bool IsManagedModProfileInstall()
+    {
+        var root = Path.GetFullPath(MelonEnvironment.ModsDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var installed = Path.GetFullPath(MainModDirectory()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return !installed.Equals(root, StringComparison.OrdinalIgnoreCase);
     }
 }

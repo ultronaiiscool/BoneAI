@@ -81,6 +81,8 @@ Codex is the only provider that uses account login. Consumer Claude/Grok/DeepSee
 
 `Plugins/BoneAI.Updater.dll` checks this repository's latest non-draft GitHub Release once at startup. When a newer release exists, it downloads the matching ZIP, verifies its published SHA-256 digest, and stages it. After BONELAB closes, the Python helper validates an allowlist of package paths, backs up existing BoneAI files under `UserData/BoneAI/Backup`, and installs the update. A failed check, missing digest, hash mismatch, unexpected file, or network outage only disables that update; it does not stop BoneAI.
 
+For Thunderstore/r2modman profile installs, BoneAI detects the managed subfolder and leaves updates to the mod manager. This avoids creating a duplicate root-level DLL. The built-in updater is used only for manual root-folder installs.
+
 ## First conversation
 
 BoneAI enables game actions by default. For a quick check:

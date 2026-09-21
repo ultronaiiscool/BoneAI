@@ -9,6 +9,7 @@
 - Added persistent saved-conversation metadata and one-click resume for Codex and direct API providers.
 - Added opt-in microphone transcription, configurable transcript-gated wake word, listen-once mode, and optional AI speech replies.
 - Kept AI work, follow/movement state, and voice polling independent of the open/closed Preferences menu.
+- Added managed-profile detection so Thunderstore/r2modman installs update through the manager without creating duplicate root-level DLLs.
 
 ## 2.2.0
 
