@@ -40,7 +40,7 @@ public sealed class CodexAppServerClient : IDisposable
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.1.0" },
+            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.1.1" },
             ["capabilities"] = new JObject { ["experimentalApi"] = true }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);

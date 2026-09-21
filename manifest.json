@@ -1,0 +1,12 @@
+{
+  "name": "BoneAI",
+  "version_number": "2.1.1",
+  "website_url": "https://github.com/ultronaiiscool/BoneAI",
+  "description": "Talk to BONELAB and let Codex inspect the world, control gameplay, use avatars, spawn through SpawnLab, and work with Fusion.",
+  "dependencies": [
+    "LavaGang-MelonLoader-0.7.3",
+    "bonelib-BoneLib-3.2.2",
+    "Lakatrazz-Fusion-1.14.2",
+    "ChappieStudios-SpawnLab-1.0.1"
+  ]
+}

@@ -1,5 +1,9 @@
 # BoneAI
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ultronaiiscool/BoneAI/main/assets/logo.png" alt="BoneAI logo" width="520">
+</p>
+
 **Talk to BONELAB. BoneAI looks around, understands your request, and uses real game actions to carry it out.**
 
 Ask normal questions or give commands such as:
@@ -24,13 +28,13 @@ BoneAI is a Windows PCVR MelonLoader/BoneLib mod. It connects only to the offici
 - Python 3 available as `python`, `python.exe`, or `py`
 - The Codex desktop app or Codex CLI, signed in with your ChatGPT account
 - LabFusion `1.14.2` for multiplayer features (optional for offline play)
-- SpawnLab `1.0.0` for spawning (BoneAI still loads without it, but spawn tools report that the provider is unavailable)
+- SpawnLab `1.0.1` for spawning (BoneAI still loads without it, but spawn tools report that the provider is unavailable)
 
 Only BoneAI's own files are included in this repository and release. BoneLib, Fusion, SpawnLab, Python, BONELAB, and Codex belong to their respective authors and must be installed separately.
 
 ### Install BoneAI
 
-1. Download `BoneAI-v2.1.0.zip` from Releases.
+1. Download the latest `BoneAI-v*.zip` from Releases.
 2. Open the ZIP. You will see `Mods` and `UserLibs` folders.
 3. Drag both folders into your BONELAB folder and allow Windows to merge them.
 4. Make sure Codex is installed, open it once, and sign in.

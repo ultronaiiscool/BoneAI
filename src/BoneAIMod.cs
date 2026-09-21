@@ -25,7 +25,7 @@ public sealed class BoneAIMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.1.0");
+        AgentLog.Info("Starting BoneAI 2.1.1");
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
