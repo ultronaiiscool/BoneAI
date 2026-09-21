@@ -62,6 +62,39 @@ public sealed class ToolRegistry
 
     public string BuildCatalogJson() => JsonConvert.SerializeObject(_descriptions.Select(x => new { name = x.Key, description = x.Value }), Formatting.None);
 
+    public JArray BuildOpenAiTools()
+    {
+        var tools = new JArray();
+        foreach (var entry in _descriptions.OrderBy(x => x.Key))
+            tools.Add(new JObject
+            {
+                ["type"] = "function",
+                ["function"] = new JObject
+                {
+                    ["name"] = ToExternalName(entry.Key),
+                    ["description"] = entry.Value,
+                    ["parameters"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                }
+            });
+        return tools;
+    }
+
+    public JArray BuildAnthropicTools()
+    {
+        var tools = new JArray();
+        foreach (var entry in _descriptions.OrderBy(x => x.Key))
+            tools.Add(new JObject
+            {
+                ["name"] = ToExternalName(entry.Key),
+                ["description"] = entry.Value,
+                ["input_schema"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+            });
+        return tools;
+    }
+
+    public static string ToExternalName(string name) => name.Replace(".", "__dot__", StringComparison.Ordinal);
+    public static string FromExternalName(string name) => name.Replace("__dot__", ".", StringComparison.Ordinal);
+
     public JArray BuildDynamicTools()
     {
         var tools = new JArray();

@@ -8,13 +8,14 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>BoneAI</AssemblyName>
     <RootNamespace>BoneAI</RootNamespace>
-    <Version>2.1.1</Version>
+    <Version>2.2.0</Version>
     <BONELAB_DIR Condition="'$(BONELAB_DIR)' == ''">$(BONELAB_DIR_ENV)</BONELAB_DIR>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="src\Catalogs\BoneAI.Catalogs.csproj" />
     <Compile Remove="src\Catalogs\**\*.cs" />
+    <Compile Remove="src\Updater\**\*.cs" />
     <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 

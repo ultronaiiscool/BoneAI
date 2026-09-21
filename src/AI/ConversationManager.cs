@@ -11,19 +11,18 @@ public sealed class ConversationManager : IDisposable
     private readonly AgentConfig _config;
     private readonly ToolRegistry _tools;
     private readonly GameToolset _game;
-    private readonly CodexAppServerClient _client;
+    private IAgentClient? _client;
+    private string _activeProvider = string.Empty;
     private CancellationTokenSource? _active;
 
     public string Status { get; private set; } = "Disconnected";
     public string LastResponse { get; private set; } = string.Empty;
     public string CurrentAction { get; private set; } = "Idle";
-    public bool Connected => _client.Connected;
+    public bool Connected => _client?.Connected == true;
 
     public ConversationManager(AgentConfig config, ToolRegistry tools, GameToolset game)
     {
         _config = config; _tools = tools; _game = game;
-        _client = new CodexAppServerClient(tools);
-        _client.StatusChanged += value => { Status = value; AgentLog.Info("Codex " + value); };
         _tools.ActionChanged += value => CurrentAction = value;
     }
 
@@ -31,11 +30,13 @@ public sealed class ConversationManager : IDisposable
     {
         try
         {
+            EnsureClient();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            await _client.ConnectAsync(_config.Endpoint.Value, timeout.Token);
-            await _client.StartThreadAsync(_config.ConversationThreadId.Value, timeout.Token);
-            _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
-            Status = "Connected";
+            await _client!.ConnectAsync(_config.Endpoint.Value, timeout.Token);
+            await _client.StartThreadAsync(_activeProvider == "Codex" ? _config.ConversationThreadId.Value : _config.ProviderConversationId.Value, timeout.Token);
+            if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
+            else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
+            Status = "Connected: " + _activeProvider;
         }
         catch (Exception ex) { Status = "Unavailable: " + ex.GetBaseException().Message; AgentLog.Warn(Status); }
     }
@@ -43,9 +44,11 @@ public sealed class ConversationManager : IDisposable
     public async Task NewConversationAsync()
     {
         Cancel();
-        if (!_client.Connected) await ConnectAsync();
+        EnsureClient();
+        if (!_client!.Connected) await ConnectAsync();
         else { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await _client.StartThreadAsync(null, timeout.Token); }
-        _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
+        if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
+        else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
         LastResponse = string.Empty;
     }
 
@@ -57,7 +60,8 @@ public sealed class ConversationManager : IDisposable
         _active = new CancellationTokenSource();
         try
         {
-            if (!_client.Connected) await ConnectAsync();
+            EnsureClient();
+            if (!_client!.Connected) await ConnectAsync();
             if (!_client.Connected) return;
             var context = JsonConvert.SerializeObject(await _tools.OnGameThreadAsync(_game.GetCompactContext).WaitAsync(_active.Token));
             if (_client.NativeToolsEnabled)
@@ -106,7 +110,7 @@ public sealed class ConversationManager : IDisposable
     {
         if (_active == null) return;
         _active.Cancel();
-        _ = _client.InterruptAsync(CancellationToken.None);
+        if (_client != null) _ = _client.InterruptAsync(CancellationToken.None);
         _active.Dispose(); _active = null;
     }
 
@@ -141,5 +145,15 @@ public sealed class ConversationManager : IDisposable
         },'required':['id','name','argumentsJson'],'additionalProperties':false}}
       },'required':['message','toolCalls'],'additionalProperties':false}");
 
-    public void Dispose() { Cancel(); _client.Dispose(); }
+    private void EnsureClient()
+    {
+        var requested = ProviderCatalog.Names.FirstOrDefault(x => x.Equals(_config.Provider.Value, StringComparison.OrdinalIgnoreCase)) ?? "Codex";
+        if (_client != null && requested == _activeProvider) return;
+        _client?.Dispose();
+        _activeProvider = requested;
+        _client = requested == "Codex" ? new CodexAppServerClient(_tools) : new ApiProviderClient(_config, _tools);
+        _client.StatusChanged += value => { Status = value; AgentLog.Info(requested + " " + value); };
+    }
+
+    public void Dispose() { Cancel(); _client?.Dispose(); }
 }

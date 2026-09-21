@@ -29,6 +29,20 @@ public sealed class AgentMenu
         page.CreateFunction("Cancel Request", Color.yellow, _mod.Conversation.Cancel);
         page.CreateFunction("Reconnect", Color.cyan, () => _ = _mod.Conversation.ConnectAsync());
         page.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
+        page.CreateFunction("Change AI Provider", Color.cyan, () =>
+        {
+            var names = BoneAI.AI.ProviderCatalog.Names;
+            var current = Array.FindIndex(names, x => x.Equals(_mod.Config.Provider.Value, StringComparison.OrdinalIgnoreCase));
+            var selected = names[(current + 1 + names.Length) % names.Length];
+            _mod.Config.Provider.Value = selected;
+            _mod.Config.ProviderModel.Value = BoneAI.AI.ProviderCatalog.DefaultModel(selected);
+            _mod.Config.ProviderBaseUrl.Value = string.Empty;
+            Notifier.Send(new Notification { Title = "BoneAI provider", Message = selected + (selected == "Codex" ? " uses your Codex login." : " uses " + BoneAI.AI.ProviderCatalog.ApiKeyEnvironmentVariable(selected) + "."), ShowTitleOnPopup = true, PopupLength = 5, Type = NotificationType.Information });
+            _ = _mod.Conversation.ConnectAsync();
+        });
+        page.CreateString("Provider (change above)", Color.white, _mod.Config.Provider.Value, value => _mod.Config.Provider.Value = value);
+        page.CreateString("Provider Model", Color.white, _mod.Config.ProviderModel.Value, value => _mod.Config.ProviderModel.Value = value);
+        page.CreateString("Custom Base URL", Color.white, _mod.Config.ProviderBaseUrl.Value, value => _mod.Config.ProviderBaseUrl.Value = value);
         page.CreateFunction("Enable All Game Controls", Color.green, () =>
         {
             _mod.Config.Enabled.Value = true;
