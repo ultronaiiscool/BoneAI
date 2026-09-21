@@ -19,21 +19,24 @@ public sealed class BoneAIMod : MelonMod
     public ConversationManager Conversation { get; private set; } = null!;
     public AgentMenu Menu { get; private set; } = null!;
     public PythonBridgeManager PythonBridge { get; private set; } = null!;
+    public VoiceAssistant Voice { get; private set; } = null!;
 
     public override void OnInitializeMelon()
     {
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.2.0");
+        AgentLog.Info("Starting BoneAI 2.3.0");
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
         Fusion.Initialize();
         Tools = new ToolRegistry(Dispatcher);
+        Tools.RegisterDiscoveryTools();
         Game = new GameToolset(Config, Fusion);
         Game.RegisterTools(Tools);
         Conversation = new ConversationManager(Config, Tools, Game);
+        Voice = new VoiceAssistant(Config, Conversation, Dispatcher);
         PythonBridge = new PythonBridgeManager();
         Menu = new AgentMenu(this);
         Menu.Create();
@@ -44,15 +47,20 @@ public sealed class BoneAIMod : MelonMod
     {
         Dispatcher.Drain();
         Game.Update();
+        Voice.Update();
         Menu.Refresh();
     }
 
     public override void OnDeinitializeMelon()
     {
+        try { Menu.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("menu shutdown", ex); }
         try { Conversation.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("shutdown", ex); }
         try { PythonBridge.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("Python bridge shutdown", ex); }
+        try { Voice.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("voice shutdown", ex); }
     }
 
     private async Task StartBackendAsync()

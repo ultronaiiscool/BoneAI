@@ -127,7 +127,135 @@ public sealed class GameToolset
         Register(r, "mods.get_capabilities", "List useful capabilities discovered in the user's installed mod DLLs and whether the AI integrates them.", ModCapabilities);
         Register(r, "logs.get_recent_errors", "Read recent error/exception lines from the current MelonLoader log. optional arguments: limit.", RecentErrors);
         Register(r, "ui.notify", "Show an in-headset BoneLib notification. arguments: message.", Notify);
+        RegisterExpandedTools(r);
     }
+
+    private void RegisterExpandedTools(ToolRegistry r)
+    {
+        bool Room() => r.Count < 350;
+        foreach (var component in new[]
+        {
+            "Rigidbody","Grip","Gun","Magazine","AmmoReceiver","Chamber","FirearmCartridge","PuppetMaster","BehaviourBaseNav","AIBrain","Enemy_Health",
+            "Seat","ButtonNode","LeverNode","MarrowEntity","Poolee","InventorySlotReceiver","Plug","Socket","KeyReceiver","Door","HingeJoint","ConfigurableJoint",
+            "FixedJoint","SpringJoint","ArticulationBody","Collider","Trigger","Zone","Checkpoint","Elevator","Vehicle","Kart","Motor","WheelCollider","HandPose",
+            "InteractableHost","GripEvents","ObjectDestructible","Destructible","Health","ImpactSfx","AudioSource","Light","ParticleSystem","Animator","NavMeshAgent",
+            "SpawnGun","NimbusGun","Constrainer","PowerPuncher","DevTool","Collectable","CrateSpawner","BoardGenerator","ZipJoint","Balloon","GachaCapsule","Keycard",
+            "ControlPanel","ToggleButton","Powerable","Battery","Generator","Turret","Drone","Projectile","Blade","MeleeWeapon","Throwable","Climbable","Ladder","Zipline",
+            "Portal","Teleporter","SecurityCamera","Display","Screen","NPC","Avatar","RigManager","Hand","Head","BodyVitals","Receiver","Transmitter","Controller"
+        })
+        {
+            if (!Room()) break;
+            var captured = component;
+            Register(r, "world.find_component_" + Slug(captured), $"Find nearby objects containing the real Unity/Marrow component type {captured}. optional arguments: query, radius, limit.", c => FindByComponent(c, captured));
+        }
+
+        foreach (var preset in new[]
+        {
+            "pistol","rifle","shotgun","smg","revolver","machine gun","sniper","launcher","sword","knife","axe","hammer","bat","crowbar","spear","shield",
+            "ammo","magazine","grenade","gadget","spawn gun","nimbus gun","constrainer","power puncher","dev tool","Ford","Nullbody","Crablet","Omni Projector",
+            "security guard","zombie","skeleton","NPC","vehicle","go kart","car","motorcycle","prop","crate","box","barrel","table","chair","locker","door","button",
+            "lever","key","keycard","battery","flashlight","radio","balloon","collectible","capsule","basketball","bowling ball","clipboard","traffic cone","trash can",
+            "shopping cart","sledgehammer","katana","combat knife","M1911","Eder22","P350","AKM","M16","MP5","Uzi","M870","FAB","vector","crowbar electric"
+        })
+        {
+            if (!Room()) break;
+            var captured = preset;
+            Register(r, "spawn.preset_" + Slug(captured), $"Search the complete SpawnLab catalog for '{captured}' and spawn the best match. Optional arguments: query or barcode.", c => SpawnPreset(c, captured), action:true, spawn:true);
+        }
+
+        foreach (var verb in new[]
+        {
+            "OnPress","Press","Activate","Deactivate","Use","Interact","Open","Close","Toggle","Unlock","Lock","Pull","Push","Trigger","Fire","Start","Stop","Enable",
+            "Disable","TurnOn","TurnOff","PowerOn","PowerOff","Engage","Disengage","Deploy","Retract","Extend","Collapse","Eject","Insert","Submit","Click","Switch","Ring",
+            "Play","Pause","Reset","Release","Grab","Attach","Detach","Mount","Dismount","Ingress","Egress"
+        })
+        {
+            if (!Room()) break;
+            var captured = verb;
+            Register(r, "interaction.invoke_" + Slug(captured), $"Invoke the exact public parameterless '{captured}' interaction method on a registered object's component. arguments: objectId.", c => InvokeInteraction(c, captured), action:true);
+        }
+
+        foreach (var mode in new[] { "force", "impulse", "velocity" })
+        foreach (var direction in new[] { "up", "down", "left", "right", "forward", "backward", "toward_player", "away_from_player" })
+        {
+            if (!Room()) break;
+            var capturedMode = mode; var capturedDirection = direction;
+            Register(r, $"physics.{capturedMode}_{capturedDirection}", $"Apply {capturedMode} in the {capturedDirection.Replace('_',' ')} direction. arguments: objectId, optional magnitude.", c => DirectionalPhysics(c, capturedMode, capturedDirection), action:true);
+        }
+
+        foreach (var (name, amount) in new[] { ("tap",2f),("light",8f),("medium",20f),("heavy",45f),("very_heavy",80f),("critical",150f),("knockout",300f) })
+        {
+            if (!Room()) break;
+            var capturedName = name; var capturedAmount = amount;
+            Register(r, "combat.damage_" + capturedName, $"Apply a real Marrow {capturedName.Replace('_',' ')} attack ({capturedAmount} base damage). arguments: objectId, optional amount override.", c => DamagePreset(c, capturedAmount), action:true, combat:true);
+        }
+
+        foreach (var (name, value, field) in new[]
+        {
+            ("strength_normal",1f,"strength"),("strength_strong",2f,"strength"),("strength_super",5f,"strength"),("strength_extreme",10f,"strength"),
+            ("speed_normal",1f,"speed"),("speed_fast",2f,"speed"),("speed_super",4f,"speed"),("speed_extreme",8f,"speed"),
+            ("jump_normal",1f,"jump"),("jump_high",2f,"jump"),("jump_super",4f,"jump"),("jump_extreme",8f,"jump")
+        })
+        {
+            if (!Room()) break;
+            var capturedValue = value; var capturedField = field;
+            Register(r, "player.preset_" + name, $"Apply the {name.Replace('_',' ')} runtime avatar preset without modifying avatar files.", c => PlayerPreset(c, capturedField, capturedValue), action:true, player:true);
+        }
+
+        foreach (var degrees in new[] { -180f,-135f,-90f,-45f,-30f,-15f,15f,30f,45f,90f,135f,180f })
+        {
+            if (!Room()) break;
+            var captured = degrees;
+            Register(r, "movement.turn_" + (captured < 0 ? "left_" : "right_") + Math.Abs(captured), $"Turn the player by {captured} degrees.", c => TurnPreset(c, captured), action:true);
+        }
+
+        foreach (var radius in new[] { 1f,2f,3f,5f,8f,10f,15f,20f,30f,40f,50f })
+        {
+            if (!Room()) break;
+            var captured = radius;
+            Register(r, "world.scan_radius_" + captured, $"List compact world objects within exactly {captured} meters. optional argument: limit.", c => ScanPreset(c, captured));
+        }
+
+        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.3.");
+    }
+
+    private ToolResult FindByComponent(ToolCall c, string component)
+    {
+        var radius = c.Arguments["radius"]?.Value<float>() ?? _config.WorldQueryRadius.Value;
+        var limit = Math.Clamp(c.Arguments["limit"]?.Value<int>() ?? 30, 1, 100);
+        var query = c.Arguments["query"]?.Value<string>() ?? string.Empty;
+        var matches = NearbyObjects(radius, 500).Where(go => go.GetComponentsInChildren<Component>().Any(x => x.GetType().Name.Equals(component, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(go => Score(go.name, query)).ThenBy(go => Vector3.Distance(Player.Head?.transform.position ?? Vector3.zero, go.transform.position)).Take(limit).Select(go => Describe(go, true)).ToArray();
+        return ToolResult.Success(c, new { component, count = matches.Length, matches });
+    }
+
+    private ToolResult SpawnPreset(ToolCall c, string preset) { if (c.Arguments["query"] == null && c.Arguments["barcode"] == null) c.Arguments["query"] = preset; return Spawn(c); }
+    private ToolResult InvokeInteraction(ToolCall c, string verb)
+    {
+        var go = NeedObject(c);
+        foreach (var component in go.GetComponentsInChildren<Component>())
+        {
+            var method = component.GetType().GetMethod(verb, BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+            if (method == null) continue;
+            method.Invoke(component, null);
+            return ToolResult.Success(c, new { component = component.GetType().Name, method = verb });
+        }
+        return ToolResult.Failure(c, $"No component exposed public {verb}().");
+    }
+    private ToolResult DirectionalPhysics(ToolCall c, string mode, string direction)
+    {
+        var body = NeedObject(c).GetComponentInChildren<Rigidbody>() ?? throw new InvalidOperationException("Object has no Rigidbody.");
+        var magnitude = Mathf.Clamp(c.Arguments["magnitude"]?.Value<float>() ?? 10f, 0f, 100f);
+        var head = Player.Head?.transform;
+        var vector = direction switch { "up" => Vector3.up, "down" => Vector3.down, "left" => Vector3.left, "right" => Vector3.right, "forward" => head?.forward ?? Vector3.forward, "backward" => -(head?.forward ?? Vector3.forward), "toward_player" => ((head?.position ?? Vector3.zero) - body.position).normalized, _ => (body.position - (head?.position ?? Vector3.zero)).normalized } * magnitude;
+        if (mode == "velocity") body.velocity = vector; else body.AddForce(vector, mode == "impulse" ? ForceMode.Impulse : ForceMode.Force);
+        return ToolResult.Success(c, new { mode, direction, magnitude });
+    }
+    private ToolResult DamagePreset(ToolCall c, float amount) { c.Arguments["amount"] ??= amount; return DamageTarget(c); }
+    private ToolResult PlayerPreset(ToolCall c, string field, float value) { c.Arguments["value"] = value; return field == "strength" ? SetStrength(c) : field == "speed" ? SetSpeed(c) : SetJump(c); }
+    private ToolResult TurnPreset(ToolCall c, float degrees) { c.Arguments["degrees"] = degrees; return Turn(c); }
+    private ToolResult ScanPreset(ToolCall c, float radius) { c.Arguments["radius"] = radius; return ListNearby(c); }
+    private static string Slug(string value) => new string(value.ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray()).Trim('_');
 
     private void Register(ToolRegistry r, string name, string description, Func<ToolCall, ToolResult> handler, bool action=false, bool player=false, bool spawn=false, bool combat=false)
         => r.Register(name, description, c =>

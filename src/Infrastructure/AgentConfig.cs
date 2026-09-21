@@ -22,6 +22,14 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<string> ProviderModel { get; }
     public MelonPreferences_Entry<string> ProviderBaseUrl { get; }
     public MelonPreferences_Entry<string> ProviderConversationId { get; }
+    public MelonPreferences_Entry<bool> VoiceBetaEnabled { get; }
+    public MelonPreferences_Entry<bool> VoiceWakeWordEnabled { get; }
+    public MelonPreferences_Entry<string> VoiceWakeWord { get; }
+    public MelonPreferences_Entry<bool> VoiceSpeakResponses { get; }
+    public MelonPreferences_Entry<string> VoiceInputDevice { get; }
+    public MelonPreferences_Entry<float> VoiceSilenceThreshold { get; }
+    public MelonPreferences_Entry<float> VoiceSilenceSeconds { get; }
+    public MelonPreferences_Entry<int> VoiceMaxSeconds { get; }
 
     public AgentConfig()
     {
@@ -44,5 +52,13 @@ public sealed class AgentConfig
         ProviderModel = category.CreateEntry("ProviderModel", string.Empty);
         ProviderBaseUrl = category.CreateEntry("ProviderBaseUrl", string.Empty);
         ProviderConversationId = category.CreateEntry("ProviderConversationId", string.Empty);
+        VoiceBetaEnabled = category.CreateEntry("VoiceBetaEnabled", false);
+        VoiceWakeWordEnabled = category.CreateEntry("VoiceWakeWordEnabled", false);
+        VoiceWakeWord = category.CreateEntry("VoiceWakeWord", "Hey BoneAI");
+        VoiceSpeakResponses = category.CreateEntry("VoiceSpeakResponses", false);
+        VoiceInputDevice = category.CreateEntry("VoiceInputDevice", string.Empty);
+        VoiceSilenceThreshold = category.CreateEntry("VoiceSilenceThreshold", 0.015f);
+        VoiceSilenceSeconds = category.CreateEntry("VoiceSilenceSeconds", 0.9f);
+        VoiceMaxSeconds = category.CreateEntry("VoiceMaxSeconds", 12);
     }
 }

@@ -12,6 +12,7 @@ public sealed class ToolRegistry
     private readonly ConcurrentDictionary<string, ActionRecord> _actions = new();
     private readonly MainThreadDispatcher _dispatcher;
     public event Action<string>? ActionChanged;
+    public int Count => _handlers.Count;
 
     public ToolRegistry(MainThreadDispatcher dispatcher) => _dispatcher = dispatcher;
 
@@ -62,10 +63,44 @@ public sealed class ToolRegistry
 
     public string BuildCatalogJson() => JsonConvert.SerializeObject(_descriptions.Select(x => new { name = x.Key, description = x.Value }), Formatting.None);
 
-    public JArray BuildOpenAiTools()
+    public string[] SelectForPrompt(string prompt, int limit)
+    {
+        var words = new HashSet<string>((prompt ?? string.Empty).ToLowerInvariant().Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ':', ';', '/', '_', '-' }, StringSplitOptions.RemoveEmptyEntries));
+        var mandatory = new[] { "tools.search", "tools.list_categories", "player.get_state", "world.look_at_target", "world.find_nearest", "fusion.get_session" };
+        return _descriptions
+            .Select(x => new
+            {
+                x.Key,
+                Score = mandatory.Contains(x.Key, StringComparer.OrdinalIgnoreCase) ? 10000 :
+                    words.Sum(word => (x.Key + " " + x.Value).Contains(word, StringComparison.OrdinalIgnoreCase) ? Math.Min(word.Length, 12) : 0)
+            })
+            .OrderByDescending(x => x.Score).ThenBy(x => x.Key)
+            .Take(Math.Clamp(limit, 8, _descriptions.Count))
+            .Select(x => x.Key).ToArray();
+    }
+
+    public void RegisterDiscoveryTools()
+    {
+        Register("tools.search", "Search BoneAI's full tool catalog. arguments: query, optional limit. Use this when the needed tool is not currently visible.", call =>
+        {
+            var query = call.Arguments["query"]?.Value<string>() ?? string.Empty;
+            var limit = Math.Clamp(call.Arguments["limit"]?.Value<int>() ?? 30, 1, 100);
+            var words = query.ToLowerInvariant().Split(new[] { ' ', '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+            var found = _descriptions.Where(x => x.Key != "tools.search")
+                .Select(x => new { name = x.Key, description = x.Value, score = words.Sum(w => (x.Key + " " + x.Value).Contains(w, StringComparison.OrdinalIgnoreCase) ? w.Length : 0) })
+                .OrderByDescending(x => x.score).ThenBy(x => x.name).Take(limit).ToArray();
+            return ToolResult.Success(call, new { totalTools = Count, matches = found });
+        });
+        Register("tools.list_categories", "List BoneAI tool namespaces and counts.", call => ToolResult.Success(call,
+            _descriptions.Keys.GroupBy(x => x.Split('.')[0]).OrderBy(x => x.Key).Select(x => new { category = x.Key, count = x.Count() }).ToArray()));
+        Register("tools.get_recent_actions", "Get recent authoritative action states and failures.", call => ToolResult.Success(call, RecentActions));
+    }
+
+    public JArray BuildOpenAiTools(IEnumerable<string>? selectedNames = null)
     {
         var tools = new JArray();
-        foreach (var entry in _descriptions.OrderBy(x => x.Key))
+        var selected = selectedNames == null ? null : new HashSet<string>(selectedNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _descriptions.Where(x => selected == null || selected.Contains(x.Key)).OrderBy(x => x.Key))
             tools.Add(new JObject
             {
                 ["type"] = "function",
@@ -79,10 +114,11 @@ public sealed class ToolRegistry
         return tools;
     }
 
-    public JArray BuildAnthropicTools()
+    public JArray BuildAnthropicTools(IEnumerable<string>? selectedNames = null)
     {
         var tools = new JArray();
-        foreach (var entry in _descriptions.OrderBy(x => x.Key))
+        var selected = selectedNames == null ? null : new HashSet<string>(selectedNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _descriptions.Where(x => selected == null || selected.Contains(x.Key)).OrderBy(x => x.Key))
             tools.Add(new JObject
             {
                 ["name"] = ToExternalName(entry.Key),

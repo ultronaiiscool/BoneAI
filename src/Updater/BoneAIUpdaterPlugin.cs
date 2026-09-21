@@ -8,7 +8,7 @@ namespace BoneAI.Updater;
 
 public sealed class BoneAIUpdaterPlugin : MelonPlugin
 {
-    private const string CurrentVersion = "2.2.0";
+    private const string CurrentVersion = "2.3.0";
     private const string LatestRelease = "https://api.github.com/repos/ultronaiiscool/BoneAI/releases/latest";
     private string? _pendingZip;
     private string? _pendingHash;
@@ -20,7 +20,7 @@ public sealed class BoneAIUpdaterPlugin : MelonPlugin
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("BoneAI-Updater/2.2.0");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("BoneAI-Updater/2.3.0");
             using var release = JsonDocument.Parse(await http.GetStringAsync(LatestRelease));
             var root = release.RootElement;
             if (root.GetProperty("prerelease").GetBoolean() || root.GetProperty("draft").GetBoolean()) return;

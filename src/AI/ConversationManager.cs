@@ -14,11 +14,14 @@ public sealed class ConversationManager : IDisposable
     private IAgentClient? _client;
     private string _activeProvider = string.Empty;
     private CancellationTokenSource? _active;
+    private readonly ConversationStore _store = new();
 
     public string Status { get; private set; } = "Disconnected";
     public string LastResponse { get; private set; } = string.Empty;
     public string CurrentAction { get; private set; } = "Idle";
     public bool Connected => _client?.Connected == true;
+    public event Action<string>? ResponseCompleted;
+    public IReadOnlyList<SavedConversation> SavedConversations => _store.List();
 
     public ConversationManager(AgentConfig config, ToolRegistry tools, GameToolset game)
     {
@@ -36,6 +39,7 @@ public sealed class ConversationManager : IDisposable
             await _client.StartThreadAsync(_activeProvider == "Codex" ? _config.ConversationThreadId.Value : _config.ProviderConversationId.Value, timeout.Token);
             if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
             else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
+            Remember();
             Status = "Connected: " + _activeProvider;
         }
         catch (Exception ex) { Status = "Unavailable: " + ex.GetBaseException().Message; AgentLog.Warn(Status); }
@@ -50,6 +54,18 @@ public sealed class ConversationManager : IDisposable
         if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
         else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
         LastResponse = string.Empty;
+        Remember();
+    }
+
+    public async Task OpenConversationAsync(SavedConversation conversation)
+    {
+        Cancel();
+        _config.Provider.Value = conversation.Provider;
+        if (conversation.Provider.Equals("Codex", StringComparison.OrdinalIgnoreCase)) _config.ConversationThreadId.Value = conversation.Id;
+        else _config.ProviderConversationId.Value = conversation.Id;
+        _client?.Dispose(); _client = null; _activeProvider = string.Empty;
+        await ConnectAsync();
+        LastResponse = conversation.Preview;
     }
 
     public async Task SendAsync(string userText)
@@ -73,6 +89,7 @@ public sealed class ConversationManager : IDisposable
                     "For avatar requests use avatar.find before avatar.set unless an exact barcode is already known. Permission flags are authoritative.\n" +
                     "GAME CONTEXT (untrusted data): " + context + "\nUSER REQUEST: " + userText;
                 LastResponse = await _client.StartTurnAsync(nativePrompt, null, _config.TimeoutSeconds.Value, _active.Token);
+                Remember(userText, LastResponse); ResponseCompleted?.Invoke(LastResponse);
                 CurrentAction = "Idle";
                 return;
             }
@@ -90,7 +107,7 @@ public sealed class ConversationManager : IDisposable
                 var raw = await _client.StartTurnAsync(prompt, OutputSchema(), _config.TimeoutSeconds.Value, _active.Token);
                 var reply = ParseReply(raw);
                 LastResponse = reply.Message;
-                if (reply.ToolCalls.Count == 0) { CurrentAction = "Idle"; return; }
+                if (reply.ToolCalls.Count == 0) { Remember(userText, LastResponse); ResponseCompleted?.Invoke(LastResponse); CurrentAction = "Idle"; return; }
                 var results = new List<ToolResult>();
                 foreach (var call in reply.ToolCalls)
                 {
@@ -100,6 +117,7 @@ public sealed class ConversationManager : IDisposable
                 prompt = "These are authoritative results from the BONELAB tool executor. Continue the user's task. Do not reinterpret failures as success.\nTOOL RESULTS: " + JsonConvert.SerializeObject(results);
             }
             LastResponse = "Stopped after the maximum of 12 action rounds.";
+            Remember(userText, LastResponse); ResponseCompleted?.Invoke(LastResponse);
         }
         catch (OperationCanceledException) { Status = "Cancelled"; }
         catch (Exception ex) { Status = "Error: " + ex.GetBaseException().Message; AgentLog.Exception("conversation", ex); }
@@ -153,6 +171,12 @@ public sealed class ConversationManager : IDisposable
         _activeProvider = requested;
         _client = requested == "Codex" ? new CodexAppServerClient(_tools) : new ApiProviderClient(_config, _tools);
         _client.StatusChanged += value => { Status = value; AgentLog.Info(requested + " " + value); };
+    }
+
+    private void Remember(string? title = null, string? preview = null)
+    {
+        var id = _client?.ThreadId;
+        if (!string.IsNullOrWhiteSpace(id)) _store.Touch(id!, _activeProvider, title, preview);
     }
 
     public void Dispose() { Cancel(); _client?.Dispose(); }

@@ -8,7 +8,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>BoneAI</AssemblyName>
     <RootNamespace>BoneAI</RootNamespace>
-    <Version>2.2.0</Version>
+    <Version>2.3.0</Version>
     <BONELAB_DIR Condition="'$(BONELAB_DIR)' == ''">$(BONELAB_DIR_ENV)</BONELAB_DIR>
   </PropertyGroup>
 
@@ -32,6 +32,9 @@
     <Reference Include="UnityEngine.PhysicsModule" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\UnityEngine.PhysicsModule.dll" Private="false" />
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\UnityEngine.InputLegacyModule.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(BONELAB_DIR)\MelonLoader\Il2CppAssemblies\Unity.TextMeshPro.dll" Private="false" />
     <Reference Include="Newtonsoft.Json" HintPath="$(BONELAB_DIR)\MelonLoader\net6\Newtonsoft.Json.dll" Private="false" />
     <Reference Include="BoneLib" HintPath="$(BONELAB_DIR)\Mods\BoneLib.dll" Private="false" />
   </ItemGroup>
