@@ -235,7 +235,7 @@ public sealed class GameToolset
             Register(r, "world.scan_radius_" + captured, $"List compact world objects within exactly {captured} meters. optional argument: limit.", c => ScanPreset(c, captured));
         }
 
-        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.5.");
+        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.6.");
     }
 
     private ToolResult FindByComponent(ToolCall c, string component)
@@ -648,7 +648,7 @@ public sealed class GameToolset
             new{name="Echolocation",loaded=Has("Echolocation"),usable=false,integration="internal perception cache is non-public; Fusion players queried directly"},
             new{name="ModioModNetworker",loaded=Has("ModioModNetworker"),usable=true,integration="automatically observes Fusion spawn traffic; no direct calls required"},
             new{name="WristHub",loaded=Has("WristHub.Core"),usable=true,integration="verified avatar index is used as the primary installed-avatar catalog; unrelated UI/system controls remain isolated"},
-            new{name="BoneAI.Catalogs",loaded=Has("BoneAI.Catalogs"),usable=true,integration="Companion provider scans WristHub and installed pallet manifests"}
+            new{name="BoneAI.Catalogs",loaded=true,usable=true,integration="Built into BoneAI.dll; scans WristHub and installed pallet manifests"}
         });
     }
     private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=c.Arguments["limit"]?.Value<int>()??40;var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).ToArray();return ToolResult.Success(c,lines);}

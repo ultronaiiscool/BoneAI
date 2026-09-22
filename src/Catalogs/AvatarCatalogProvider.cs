@@ -1,4 +1,5 @@
 using System.Text.Json;
+using UnityEngine;
 
 namespace BoneAI.Catalogs;
 
@@ -15,8 +16,7 @@ public sealed class AvatarCatalogProvider
     public AvatarCatalogProvider(string userDataDirectory)
     {
         _userDataDirectory = userDataDirectory;
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        _contentModsDirectory = Path.GetFullPath(Path.Combine(local, "..", "LocalLow", "Stress Level Zero", "BONELAB", "Mods"));
+        _contentModsDirectory = Path.GetFullPath(Path.Combine(Application.persistentDataPath, "Mods"));
     }
 
     public IReadOnlyList<AvatarCatalogItem> Items

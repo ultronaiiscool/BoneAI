@@ -86,7 +86,7 @@ public sealed class AgentMenu
         var diagnostics = _root.CreatePage("Diagnostics", Color.gray, 8);
         diagnostics.CreateString("Tool Catalog", Color.white, _mod.Tools.Count + " tools", _ => { });
         diagnostics.CreateString("Fusion", Color.white, _mod.Fusion.IsOnline ? "Online" : _mod.Fusion.IsAvailable ? "Installed / offline" : "Not installed", _ => { });
-        Bind(diagnostics, "Auto-start Bridge", _mod.Config.AutoStartPythonBridge);
+        Bind(diagnostics, "Auto-start Codex Host", _mod.Config.AutoStartCodexHost);
         Bind(diagnostics, "Debug Logging", _mod.Config.DebugLogging, v => Infrastructure.AgentLog.Verbose = v);
         diagnostics.CreateFunction("Reconnect", Color.green, () => _ = _mod.Conversation.ConnectAsync());
 

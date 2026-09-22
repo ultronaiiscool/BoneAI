@@ -8,13 +8,12 @@
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">AnyCPU</PlatformTarget>
     <AssemblyName>BoneAI</AssemblyName>
     <RootNamespace>BoneAI</RootNamespace>
-    <Version>2.5.0</Version>
+    <Version>2.6.0</Version>
     <BONELAB_DIR Condition="'$(BONELAB_DIR)' == ''">$(BONELAB_DIR_ENV)</BONELAB_DIR>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="src\Catalogs\BoneAI.Catalogs.csproj" />
-    <Compile Remove="src\Catalogs\**\*.cs" />
+    <Compile Remove="src\Catalogs\bin\**\*.cs;src\Catalogs\obj\**\*.cs;src\Catalogs\artifacts\**\*.cs" />
     <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 

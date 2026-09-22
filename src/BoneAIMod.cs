@@ -18,7 +18,7 @@ public sealed class BoneAIMod : MelonMod
     public FusionBridge Fusion { get; private set; } = null!;
     public ConversationManager Conversation { get; private set; } = null!;
     public AgentMenu Menu { get; private set; } = null!;
-    public PythonBridgeManager PythonBridge { get; private set; } = null!;
+    public CodexHostManager CodexHost { get; private set; } = null!;
     public VoiceAssistant Voice { get; private set; } = null!;
 
     public override void OnInitializeMelon()
@@ -26,7 +26,7 @@ public sealed class BoneAIMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.5.0 on " + PlatformInfo.DisplayName);
+        AgentLog.Info("Starting BoneAI 2.6.0 Compatibility Extended on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -37,7 +37,7 @@ public sealed class BoneAIMod : MelonMod
         Game.RegisterTools(Tools);
         Conversation = new ConversationManager(Config, Tools, Game);
         Voice = new VoiceAssistant(Config, Conversation, Dispatcher);
-        PythonBridge = new PythonBridgeManager();
+        CodexHost = new CodexHostManager();
         Menu = new AgentMenu(this);
         Menu.Create();
         _ = StartBackendAsync();
@@ -57,8 +57,8 @@ public sealed class BoneAIMod : MelonMod
         catch (Exception ex) { AgentLog.Exception("menu shutdown", ex); }
         try { Conversation.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("shutdown", ex); }
-        try { PythonBridge.Dispose(); }
-        catch (Exception ex) { AgentLog.Exception("Python bridge shutdown", ex); }
+        try { CodexHost.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("Codex host shutdown", ex); }
         try { Voice.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("voice shutdown", ex); }
     }
@@ -68,7 +68,7 @@ public sealed class BoneAIMod : MelonMod
         try
         {
             if (!PlatformInfo.IsAndroid && Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
-                await PythonBridge.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartPythonBridge.Value).ConfigureAwait(false);
+                await CodexHost.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartCodexHost.Value).ConfigureAwait(false);
             await Conversation.ConnectAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }

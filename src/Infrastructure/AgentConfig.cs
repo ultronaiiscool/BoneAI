@@ -17,7 +17,7 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<float> WorldQueryRadius { get; }
     public MelonPreferences_Entry<int> WorldQueryLimit { get; }
     public MelonPreferences_Entry<string> ConversationThreadId { get; }
-    public MelonPreferences_Entry<bool> AutoStartPythonBridge { get; }
+    public MelonPreferences_Entry<bool> AutoStartCodexHost { get; }
     public MelonPreferences_Entry<bool> AllowInsecureRemoteCodex { get; }
     public MelonPreferences_Entry<string> Provider { get; }
     public MelonPreferences_Entry<string> ProviderModel { get; }
@@ -48,7 +48,7 @@ public sealed class AgentConfig
         WorldQueryRadius = category.CreateEntry("WorldQueryRadius", 12f);
         WorldQueryLimit = category.CreateEntry("WorldQueryLimit", 40);
         ConversationThreadId = category.CreateEntry("CodexThreadId", string.Empty);
-        AutoStartPythonBridge = category.CreateEntry("AutoStartPythonBridge", true);
+        AutoStartCodexHost = category.CreateEntry("AutoStartCodexHost", true);
         AllowInsecureRemoteCodex = category.CreateEntry("AllowInsecureRemoteCodex", false);
         Provider = category.CreateEntry("Provider", "Codex");
         ProviderModel = category.CreateEntry("ProviderModel", string.Empty);
