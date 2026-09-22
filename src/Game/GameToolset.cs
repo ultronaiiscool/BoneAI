@@ -235,7 +235,7 @@ public sealed class GameToolset
             Register(r, "world.scan_radius_" + captured, $"List compact world objects within exactly {captured} meters. optional argument: limit.", c => ScanPreset(c, captured));
         }
 
-        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.6.");
+        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.7.");
     }
 
     private ToolResult FindByComponent(ToolCall c, string component)

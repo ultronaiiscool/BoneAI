@@ -207,23 +207,34 @@ public sealed class ApiProviderClient : IAgentClient
 
     private async Task<JObject> PostAsync(string url, JObject body, bool anthropic, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json");
-        var key = GetApiKey(_config.Provider.Value);
-        if (anthropic)
+        var serialized = body.ToString(Formatting.None);
+        for (var attempt = 0; ; attempt++)
         {
-            request.Headers.Add("x-api-key", key);
-            request.Headers.Add("anthropic-version", "2023-06-01");
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = new StringContent(serialized, Encoding.UTF8, "application/json");
+            var key = GetApiKey(_config.Provider.Value);
+            if (anthropic) { request.Headers.Add("x-api-key", key); request.Headers.Add("anthropic-version", "2023-06-01"); }
+            else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            request.Headers.UserAgent.ParseAdd("BoneAI/2.7.0");
+            if (ProviderCatalog.IsOpenRouter(_config.Provider.Value))
+            {
+                request.Headers.TryAddWithoutValidation("HTTP-Referer", "https://github.com/ultronaiiscool/BoneAI");
+                request.Headers.TryAddWithoutValidation("X-Title", "BoneAI");
+            }
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            var raw = await ReadLimitedTextAsync(response.Content, MaxJsonResponseBytes, cancellationToken).ConfigureAwait(false);
+            JObject json;
+            try { json = JObject.Parse(raw); }
+            catch (JsonException ex) { throw new InvalidOperationException($"Provider HTTP {(int)response.StatusCode} returned non-JSON data: " + Trim(raw, 300), ex); }
+            if (response.IsSuccessStatusCode) return json;
+            if (attempt < 2 && ((int)response.StatusCode is 429 or 502 or 503))
+            {
+                var retry = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromMilliseconds(600 * (1 << attempt) + Random.Shared.Next(50, 250));
+                await Task.Delay(retry > TimeSpan.FromSeconds(8) ? TimeSpan.FromSeconds(8) : retry, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+            throw ApiError($"Provider HTTP {(int)response.StatusCode}", json);
         }
-        else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Headers.UserAgent.ParseAdd("BoneAI/2.6.2");
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        var raw = await ReadLimitedTextAsync(response.Content, MaxJsonResponseBytes, cancellationToken).ConfigureAwait(false);
-        JObject json;
-        try { json = JObject.Parse(raw); }
-        catch (JsonException ex) { throw new InvalidOperationException($"Provider HTTP {(int)response.StatusCode} returned non-JSON data: " + Trim(raw, 300), ex); }
-        if (!response.IsSuccessStatusCode) throw ApiError($"Provider HTTP {(int)response.StatusCode}", json);
-        return json;
     }
 
     private static async Task<string> ReadLimitedTextAsync(HttpContent content, int limit, CancellationToken cancellationToken)
@@ -282,24 +293,25 @@ public sealed class ApiProviderClient : IAgentClient
 
 public static class ProviderCatalog
 {
-    public static readonly string[] Names = { "Codex", "OpenAI", "Claude", "Grok", "DeepSeek", "OpenRouter", "Ollama", "Custom" };
+    public static readonly string[] Names = { "Codex", "OpenRouter Free", "OpenAI", "Claude", "Grok", "DeepSeek", "OpenRouter", "Ollama", "Custom" };
     public static bool IsAnthropic(string provider) => provider.Equals("Claude", StringComparison.OrdinalIgnoreCase);
     public static bool IsOpenAi(string provider) => provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase);
     public static bool IsLocal(string provider) => provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase);
+    public static bool IsOpenRouter(string provider) => provider.Equals("OpenRouter", StringComparison.OrdinalIgnoreCase) || provider.Equals("OpenRouter Free", StringComparison.OrdinalIgnoreCase);
     public static string ApiKeyEnvironmentVariable(string provider) => provider.ToLowerInvariant() switch
     {
         "claude" => "ANTHROPIC_API_KEY", "grok" => "XAI_API_KEY", "deepseek" => "DEEPSEEK_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY", "ollama" => "OLLAMA_API_KEY", "custom" => "BONEAI_API_KEY", _ => "OPENAI_API_KEY"
+        "openrouter" or "openrouter free" => "OPENROUTER_API_KEY", "ollama" => "OLLAMA_API_KEY", "custom" => "BONEAI_API_KEY", _ => "OPENAI_API_KEY"
     };
     public static string DefaultModel(string provider) => provider.ToLowerInvariant() switch
     {
         "openai" => "gpt-5.3-codex",
         "claude" => "claude-sonnet-4-5", "grok" => "grok-4.6", "deepseek" => "deepseek-v4-flash",
-        "openrouter" => "openrouter/auto", "ollama" => "qwen3", _ => string.Empty
+        "openrouter" => "openrouter/auto", "openrouter free" => "openrouter/free", "ollama" => "qwen3", _ => string.Empty
     };
     public static int ToolLimit(string provider) => provider.ToLowerInvariant() switch
     {
-        "deepseek" => 120,
+        "deepseek" or "openrouter free" => 120,
         "grok" => 190,
         _ => 120
     };
@@ -310,7 +322,7 @@ public static class ProviderCatalog
         {
             "openai" => "https://api.openai.com/v1",
             "claude" => "https://api.anthropic.com/v1", "grok" => "https://api.x.ai/v1",
-            "deepseek" => "https://api.deepseek.com", "openrouter" => "https://openrouter.ai/api/v1",
+            "deepseek" => "https://api.deepseek.com", "openrouter" or "openrouter free" => "https://openrouter.ai/api/v1",
             "ollama" => "http://127.0.0.1:11434/v1", _ => throw new InvalidOperationException("Set ProviderBaseUrl for the custom provider.")
         };
         var endpoint = root + (IsAnthropic(config.Provider.Value) ? "/messages" : IsOpenAi(config.Provider.Value) ? "/responses" : "/chat/completions");
@@ -334,7 +346,7 @@ public static class ProviderCatalog
                 throw new InvalidOperationException("Custom providers require HTTPS, except localhost development endpoints.");
             return;
         }
-        var requiredHost = p switch { "openai" => "api.openai.com", "claude" => "api.anthropic.com", "grok" => "api.x.ai", "deepseek" => "api.deepseek.com", "openrouter" => "openrouter.ai", _ => throw new InvalidOperationException("Unknown provider.") };
+        var requiredHost = p switch { "openai" => "api.openai.com", "claude" => "api.anthropic.com", "grok" => "api.x.ai", "deepseek" => "api.deepseek.com", "openrouter" or "openrouter free" => "openrouter.ai", _ => throw new InvalidOperationException("Unknown provider.") };
         if (uri.Scheme != "https" || !uri.Host.Equals(requiredHost, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(provider + " keys may only be sent to https://" + requiredHost + ". Use Custom for another endpoint.");
     }

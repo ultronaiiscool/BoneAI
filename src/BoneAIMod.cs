@@ -20,6 +20,7 @@ public sealed class BoneAIMod : MelonMod
     public AgentMenu Menu { get; private set; } = null!;
     public CodexHostManager CodexHost { get; private set; } = null!;
     public VoiceAssistant Voice { get; private set; } = null!;
+    public BrowserVoiceServer BrowserVoice { get; private set; } = null!;
 
     public override void OnInitializeMelon()
     {
@@ -27,7 +28,7 @@ public sealed class BoneAIMod : MelonMod
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
         RuntimeSecrets.Initialize();
-        AgentLog.Info("Starting BoneAI 2.6.2 Secure Persistence on " + PlatformInfo.DisplayName);
+        AgentLog.Info("Starting BoneAI 2.7.0 Free Voice on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -38,6 +39,7 @@ public sealed class BoneAIMod : MelonMod
         Game.RegisterTools(Tools);
         Conversation = new ConversationManager(Config, Tools, Game);
         Voice = new VoiceAssistant(Config, Conversation, Dispatcher);
+        BrowserVoice = new BrowserVoiceServer(Conversation, Config);
         CodexHost = new CodexHostManager();
         Menu = new AgentMenu(this);
         Menu.Create();
@@ -62,6 +64,8 @@ public sealed class BoneAIMod : MelonMod
         catch (Exception ex) { AgentLog.Exception("Codex host shutdown", ex); }
         try { Voice.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("voice shutdown", ex); }
+        try { BrowserVoice.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("browser voice shutdown", ex); }
     }
 
     private async Task StartBackendAsync()

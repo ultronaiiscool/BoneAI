@@ -52,12 +52,15 @@ public sealed class AgentMenu
         voice.CreateString("Wake Word", Color.white, _mod.Config.VoiceWakeWord.Value, v => _mod.Config.VoiceWakeWord.Value = string.IsNullOrWhiteSpace(v) ? "Hey BoneAI" : v.Trim());
         Bind(voice, "Speak AI Replies", _mod.Config.VoiceSpeakResponses);
         voice.CreateFunction("Listen Once", Color.green, _mod.Voice.ListenOnce);
+        voice.CreateFunction("Open Free Browser Voice", Color.cyan, OpenBrowserVoice);
+        voice.CreateFunction("Stop Browser Voice", Color.yellow, _mod.BrowserVoice.Stop);
         _voiceStatus = voice.CreateString("Voice Status", Color.gray, "Voice beta off", _ => { });
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
-        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Enter an OpenAI API key under AI Provider. BoneAI saves it with your device's protected credential storage until you clear it."));
+        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Free Browser Voice uses Edge/Chrome/Quest Browser and needs no STT key. Keep its page open. The original in-game microphone mode still requires an OpenAI key."));
 
         var provider = _root.CreatePage("AI Provider", new Color(0.55f, 0.55f, 1f), 9);
-        provider.CreateFunction("Quest Standalone OpenAI", Color.green, SelectQuestStandaloneOpenAi);
+        provider.CreateFunction("Paid OpenAI Direct", Color.white, SelectQuestStandaloneOpenAi);
+        provider.CreateFunction("Free OpenRouter", Color.green, SelectFreeOpenRouter);
         provider.CreateFunction("Change Provider", Color.cyan, CycleProvider);
         provider.CreateString("Provider", Color.white, _mod.Config.Provider.Value, v => _mod.Config.Provider.Value = v);
         provider.CreateString("Model", Color.white, _mod.Config.ProviderModel.Value, v => _mod.Config.ProviderModel.Value = v);
@@ -74,7 +77,7 @@ public sealed class AgentMenu
         codex.CreateFunction("Reconnect", Color.white, () => _ = _mod.Conversation.ConnectAsync());
         codex.CreateFunction("Sign Out", Color.red, () => _ = SignOutCodexAsync());
         codex.CreateFunction("About Saved Login", Color.white, () => Notify("Codex Login", "Codex securely keeps and refreshes your login. It remains signed in after restarts until you choose Sign Out."));
-        codex.CreateFunction("Quest Standalone Help", Color.yellow, () => Notify("Quest Standalone", "For no-PC Quest use, choose OpenAI or another cloud provider under AI Provider and enter its API key in-game. Codex account sign-in requires the official App Server and is PCVR-only."));
+        codex.CreateFunction("Quest Standalone Help", Color.yellow, () => Notify("Quest Standalone", "Choose Free OpenRouter and enter your OpenRouter key. Official Codex account mode still requires Codex App Server, which OpenAI does not publish for Android."));
 
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
         permissions.CreateFunction("Enable All Game Controls", Color.green, EnableAll);
@@ -105,7 +108,7 @@ public sealed class AgentMenu
         if (_status != null) _status.Value = Trim(_mod.Conversation.Status, 80);
         if (_activity != null) _activity.Value = Trim(_mod.Conversation.CurrentAction, 80);
         if (_response != null) _response.Value = Trim(_mod.Conversation.LastResponse, 120);
-        if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.Voice.Status, 100);
+        if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.BrowserVoice.Running ? _mod.BrowserVoice.Status : _mod.Voice.Status, 100);
         if (_transcript != null) _transcript.Value = Trim(_mod.Voice.LastTranscript, 100);
         if (_loginCode != null) _loginCode.Value = string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginCode) ? (_mod.Conversation.CodexSignedIn ? "Signed in (saved by Codex)" : "Not signed in") : _mod.Conversation.DeviceLoginCode;
         if (_conversationCount != _mod.Conversation.SavedConversationCount) BuildConversations();
@@ -174,6 +177,8 @@ public sealed class AgentMenu
     {
         try
         {
+            if (Infrastructure.PlatformInfo.IsAndroid)
+                throw new PlatformNotSupportedException("Quest cannot complete official Codex account mode because OpenAI does not publish Codex App Server for Android. The browser code alone cannot run Codex. Use Free OpenRouter on Quest.");
             if (!Infrastructure.PlatformInfo.IsAndroid && !await _mod.EnsureCodexHostAsync().ConfigureAwait(false))
                 throw new InvalidOperationException(_mod.CodexHost.Status);
             var login = await _mod.Conversation.StartCodexDeviceLoginAsync().ConfigureAwait(false);
@@ -195,7 +200,8 @@ public sealed class AgentMenu
     {
         try
         {
-            if (!Infrastructure.PlatformInfo.IsAndroid && !await _mod.EnsureCodexHostAsync().ConfigureAwait(false)) throw new InvalidOperationException(_mod.CodexHost.Status);
+            if (Infrastructure.PlatformInfo.IsAndroid) throw new PlatformNotSupportedException("Codex App Server is not available on Quest.");
+            if (!await _mod.EnsureCodexHostAsync().ConfigureAwait(false)) throw new InvalidOperationException(_mod.CodexHost.Status);
             _mod.Config.Provider.Value = "Codex";
             await _mod.Conversation.ConnectAsync().ConfigureAwait(false);
             await _mod.Conversation.LogoutCodexAsync().ConfigureAwait(false);
@@ -224,6 +230,24 @@ public sealed class AgentMenu
         _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel("OpenAI");
         _mod.Config.ProviderBaseUrl.Value = string.Empty;
         Notify("Quest Standalone", "OpenAI direct mode selected. Enter your OpenAI API key below; no PC or bridge is used.");
+    }
+    private void SelectFreeOpenRouter()
+    {
+        _mod.Config.Provider.Value = "OpenRouter Free";
+        _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel("OpenRouter Free");
+        _mod.Config.ProviderBaseUrl.Value = string.Empty;
+        Notify("Free OpenRouter", "Free-model routing selected. Bring your OpenRouter API key, enter it under API Key, then reconnect.");
+    }
+    private void OpenBrowserVoice()
+    {
+        try
+        {
+            var url = _mod.BrowserVoice.Start();
+            GUIUtility.systemCopyBuffer = url;
+            Application.OpenURL(url);
+            Notify("Browser Voice", "Voice page opened and its private local URL was copied. Press Start there and keep the page open.");
+        }
+        catch (Exception ex) { Infrastructure.AgentLog.Exception("Browser voice start", ex); Notify("Browser Voice Failed", ex.GetBaseException().Message); }
     }
     private void CycleProvider() { var names = AI.ProviderCatalog.Names; var at = Array.FindIndex(names, x => x.Equals(_mod.Config.Provider.Value, StringComparison.OrdinalIgnoreCase)); var next = names[(at + 1 + names.Length) % names.Length]; _mod.Config.Provider.Value = next; _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel(next); _mod.Config.ProviderBaseUrl.Value = string.Empty; Notify("BoneAI provider", next); _ = _mod.Conversation.ConnectAsync(); }
     private static void Notify(string title, string message) => Notifier.Send(new Notification { Title = title, Message = message, ShowTitleOnPopup = true, PopupLength = 7, Type = NotificationType.Information });

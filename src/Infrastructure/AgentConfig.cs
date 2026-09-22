@@ -18,7 +18,6 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<int> WorldQueryLimit { get; }
     public MelonPreferences_Entry<string> ConversationThreadId { get; }
     public MelonPreferences_Entry<bool> AutoStartCodexHost { get; }
-    public MelonPreferences_Entry<bool> AllowInsecureRemoteCodex { get; }
     public MelonPreferences_Entry<string> Provider { get; }
     public MelonPreferences_Entry<string> ProviderModel { get; }
     public MelonPreferences_Entry<string> ProviderBaseUrl { get; }
@@ -49,9 +48,8 @@ public sealed class AgentConfig
         WorldQueryLimit = category.CreateEntry("WorldQueryLimit", 40);
         ConversationThreadId = category.CreateEntry("CodexThreadId", string.Empty);
         AutoStartCodexHost = category.CreateEntry("AutoStartCodexHost", true);
-        AllowInsecureRemoteCodex = category.CreateEntry("AllowInsecureRemoteCodex", false);
-        Provider = category.CreateEntry("Provider", PlatformInfo.IsAndroid ? "OpenAI" : "Codex");
-        ProviderModel = category.CreateEntry("ProviderModel", PlatformInfo.IsAndroid ? "gpt-5.3-codex" : string.Empty);
+        Provider = category.CreateEntry("Provider", PlatformInfo.IsAndroid ? "OpenRouter Free" : "Codex");
+        ProviderModel = category.CreateEntry("ProviderModel", PlatformInfo.IsAndroid ? "openrouter/free" : string.Empty);
         ProviderBaseUrl = category.CreateEntry("ProviderBaseUrl", string.Empty);
         ProviderConversationId = category.CreateEntry("ProviderConversationId", string.Empty);
         VoiceBetaEnabled = category.CreateEntry("VoiceBetaEnabled", false);

@@ -49,5 +49,9 @@ public static class RuntimeSecrets
         lock (Gate) { ProviderApiKeys.Clear(); try { Store.Clear(); LastStorageError = null; } catch (Exception ex) { LastStorageError = ex.GetBaseException().Message; } }
     }
 
-    private static string Normalize(string provider) => (provider ?? string.Empty).Trim().ToLowerInvariant();
+    private static string Normalize(string provider)
+    {
+        var normalized = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized == "openrouter free" ? "openrouter" : normalized;
+    }
 }
