@@ -1,8 +1,8 @@
 {
   "name": "BoneAI",
-  "version_number": "2.2.0",
+  "version_number": "2.5.0",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
-  "description": "A multi-provider AI gameplay agent for BONELAB with Codex, Claude, Grok, DeepSeek, OpenRouter, Ollama, SpawnLab, Fusion, and safe updates.",
+  "description": "An optimized 350-tool multi-provider BONELAB gameplay agent with voice beta, SpawnLab, and Fusion support.",
   "dependencies": [
     "LavaGang-MelonLoader-0.7.3",
     "bonelib-BoneLib-3.2.2",

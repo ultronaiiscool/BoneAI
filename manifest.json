@@ -1,6 +1,6 @@
 {
   "name": "BoneAI",
-  "version_number": "2.4.0",
+  "version_number": "2.5.0",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
   "description": "An optimized 350-tool multi-provider BONELAB gameplay agent with voice beta, SpawnLab, and Fusion support.",
   "dependencies": [

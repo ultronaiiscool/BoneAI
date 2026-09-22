@@ -158,7 +158,7 @@ public sealed class ApiProviderClient : IAgentClient
             request.Headers.Add("anthropic-version", "2023-06-01");
         }
         else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Headers.UserAgent.ParseAdd("BoneAI/2.4.0");
+        request.Headers.UserAgent.ParseAdd("BoneAI/2.5.0");
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         JObject json;

@@ -21,6 +21,9 @@ public sealed class ConversationManager : IDisposable
     public string LastResponse { get; private set; } = string.Empty;
     public string CurrentAction { get; private set; } = "Idle";
     public bool Connected => _client?.Connected == true;
+    public bool CodexSignedIn { get; private set; }
+    public string DeviceLoginCode { get; private set; } = string.Empty;
+    public string DeviceLoginUrl { get; private set; } = string.Empty;
     public event Action<string>? ResponseCompleted;
     public IReadOnlyList<SavedConversation> SavedConversations => _store.List();
     public int SavedConversationCount => _store.Count;
@@ -39,6 +42,15 @@ public sealed class ConversationManager : IDisposable
             EnsureClient();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             await _client!.ConnectAsync(_config.Endpoint.Value, timeout.Token);
+            if (_client is CodexAppServerClient codex)
+            {
+                CodexSignedIn = await codex.IsAccountSignedInAsync(timeout.Token).ConfigureAwait(false);
+                if (!CodexSignedIn)
+                {
+                    Status = "Codex sign-in required";
+                    return;
+                }
+            }
             await _client.StartThreadAsync(_activeProvider == "Codex" ? _config.ConversationThreadId.Value : _config.ProviderConversationId.Value, timeout.Token);
             if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
             else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
@@ -49,11 +61,51 @@ public sealed class ConversationManager : IDisposable
         finally { _connectGate.Release(); }
     }
 
+    public async Task<CodexDeviceLogin> StartCodexDeviceLoginAsync()
+    {
+        await _connectGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _config.Provider.Value = "Codex";
+            EnsureClient();
+            if (!_client!.Connected)
+            {
+                using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                await _client.ConnectAsync(_config.Endpoint.Value, connectTimeout.Token).ConfigureAwait(false);
+            }
+            if (_client is not CodexAppServerClient codex) throw new InvalidOperationException("Codex is not the active provider.");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var login = await codex.BeginDeviceLoginAsync(timeout.Token).ConfigureAwait(false);
+            DeviceLoginCode = login.UserCode;
+            DeviceLoginUrl = login.VerificationUrl;
+            Status = "Enter code " + login.UserCode + " in the browser";
+            return login;
+        }
+        finally { _connectGate.Release(); }
+    }
+
+    public async Task LogoutCodexAsync()
+    {
+        EnsureClient();
+        if (_client is not CodexAppServerClient codex || !codex.Connected) return;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await codex.LogoutAsync(timeout.Token).ConfigureAwait(false);
+        CodexSignedIn = false;
+        DeviceLoginCode = DeviceLoginUrl = string.Empty;
+        _config.ConversationThreadId.Value = string.Empty;
+        Status = "Codex signed out";
+    }
+
     public async Task NewConversationAsync()
     {
         Cancel();
         EnsureClient();
         if (!_client!.Connected) await ConnectAsync();
+        if (string.IsNullOrWhiteSpace(_client.ThreadId))
+        {
+            Status = _activeProvider == "Codex" ? "Codex sign-in required. Open BoneAI > Codex Sign-In." : _activeProvider + " is not connected.";
+            return;
+        }
         else { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await _client.StartThreadAsync(null, timeout.Token); }
         if (_activeProvider == "Codex") _config.ConversationThreadId.Value = _client.ThreadId ?? string.Empty;
         else _config.ProviderConversationId.Value = _client.ThreadId ?? string.Empty;
@@ -83,7 +135,11 @@ public sealed class ConversationManager : IDisposable
         {
             EnsureClient();
             if (!_client!.Connected) await ConnectAsync();
-            if (!_client.Connected) return;
+            if (!_client.Connected || string.IsNullOrWhiteSpace(_client.ThreadId))
+            {
+                if (_activeProvider == "Codex") Status = "Codex sign-in required. Open BoneAI > Codex Sign-In.";
+                return;
+            }
             var context = JsonConvert.SerializeObject(await _tools.OnGameThreadAsync(_game.GetCompactContext).WaitAsync(active.Token));
             if (_client.NativeToolsEnabled)
             {
@@ -181,6 +237,29 @@ public sealed class ConversationManager : IDisposable
         _activeProvider = requested;
         _client = requested == "Codex" ? new CodexAppServerClient(_tools) : new ApiProviderClient(_config, _tools);
         _client.StatusChanged += value => { Status = value; AgentLog.Info(requested + " " + value); };
+        if (_client is CodexAppServerClient codex)
+            codex.LoginCompleted += (success, error) =>
+            {
+                CodexSignedIn = success;
+                Status = success ? "Codex signed in; connecting conversation" : "Codex sign-in failed: " + error;
+                if (success) _ = FinishCodexLoginAsync(codex);
+            };
+    }
+
+    private async Task FinishCodexLoginAsync(CodexAppServerClient codex)
+    {
+        await _connectGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await codex.StartThreadAsync(_config.ConversationThreadId.Value, timeout.Token).ConfigureAwait(false);
+            _config.ConversationThreadId.Value = codex.ThreadId ?? string.Empty;
+            DeviceLoginCode = DeviceLoginUrl = string.Empty;
+            Remember();
+            Status = "Connected: Codex";
+        }
+        catch (Exception ex) { Status = "Signed in, but conversation failed: " + ex.GetBaseException().Message; AgentLog.Exception("Codex post-login", ex); }
+        finally { _connectGate.Release(); }
     }
 
     private void Remember(string? title = null, string? preview = null)

@@ -15,6 +15,12 @@ public sealed class PythonBridgeManager : IDisposable
 
     public async Task<bool> EnsureStartedAsync(string endpoint, bool enabled)
     {
+        if (PlatformInfo.IsAndroid)
+        {
+            Status = "Quest uses a remote Codex App Server; Python is not launched on the headset";
+            AgentLog.Info(Status);
+            return false;
+        }
         if (!enabled)
         {
             Status = "Automatic bridge launch disabled";

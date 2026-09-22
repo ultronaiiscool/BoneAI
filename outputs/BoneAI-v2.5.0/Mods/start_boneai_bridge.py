@@ -5,14 +5,10 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import hashlib
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
-import time
-import zipfile
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -32,15 +28,7 @@ def main() -> int:
     )
     parser.add_argument("--port", type=int, default=4500)
     parser.add_argument("--parent-pid", type=int, default=0, help=argparse.SUPPRESS)
-    parser.add_argument("--install-update", type=Path, help=argparse.SUPPRESS)
-    parser.add_argument("--expected-sha256", default="", help=argparse.SUPPRESS)
-    parser.add_argument("--game-dir", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
-
-    if args.install_update:
-        if not args.game_dir or not args.expected_sha256:
-            parser.error("update installation requires --game-dir and --expected-sha256")
-        return install_update(args.install_update, args.expected_sha256, args.game_dir, args.parent_pid)
 
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -133,47 +121,6 @@ def find_codex() -> str | None:
         return None
     candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     return str(candidates[0])
-
-
-def install_update(archive: Path, expected_sha256: str, game_dir: Path, parent_pid: int) -> int:
-    """Wait for BONELAB to exit, then atomically install a verified BoneAI release."""
-    while parent_is_running(parent_pid):
-        time.sleep(0.5)
-    archive = archive.resolve()
-    game_dir = game_dir.resolve()
-    actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if actual.lower() != expected_sha256.lower():
-        print("BoneAI update digest changed; refusing installation.", file=sys.stderr)
-        return 2
-    allowed = {
-        "Mods/BoneAI.dll", "Mods/start_boneai_bridge.py",
-        "UserLibs/BoneAI.Catalogs.dll", "Plugins/BoneAI.Updater.dll",
-        "README.md", "INSTALL-FIRST.md", "CHANGELOG.md", "LICENSE", "manifest.json", "icon.png",
-    }
-    with tempfile.TemporaryDirectory(prefix="boneai-update-") as temp_name:
-        temp = Path(temp_name)
-        with zipfile.ZipFile(archive) as package:
-            members = [name.replace("\\", "/").strip("/") for name in package.namelist() if not name.endswith("/")]
-            unexpected = [name for name in members if name not in allowed or ".." in Path(name).parts]
-            if unexpected:
-                print(f"BoneAI update contains unexpected files: {unexpected}", file=sys.stderr)
-                return 3
-            package.extractall(temp)
-        backup = game_dir / "UserData" / "BoneAI" / "Backup"
-        backup.mkdir(parents=True, exist_ok=True)
-        for relative in members:
-            source = temp / Path(relative)
-            destination = game_dir / Path(relative)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                backup_target = backup / Path(relative)
-                backup_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(destination, backup_target)
-            staged = destination.with_suffix(destination.suffix + ".boneai-new")
-            shutil.copy2(source, staged)
-            os.replace(staged, destination)
-    print("BoneAI update installed successfully.")
-    return 0
 
 
 if __name__ == "__main__":

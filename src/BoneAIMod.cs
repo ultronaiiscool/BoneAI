@@ -26,7 +26,7 @@ public sealed class BoneAIMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.4.0");
+        AgentLog.Info("Starting BoneAI 2.5.0 on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -67,7 +67,7 @@ public sealed class BoneAIMod : MelonMod
     {
         try
         {
-            if (Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
+            if (!PlatformInfo.IsAndroid && Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
                 await PythonBridge.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartPythonBridge.Value).ConfigureAwait(false);
             await Conversation.ConnectAsync().ConfigureAwait(false);
         }

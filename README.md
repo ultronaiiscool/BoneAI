@@ -16,7 +16,7 @@ Ask normal questions or give commands such as:
 
 > Change me to my Morty avatar and make me stronger.
 
-BoneAI is a Windows PCVR MelonLoader/BoneLib mod. Codex remains the default and uses your existing ChatGPT/Codex sign-in. Version 2.4 retains the complete 350-tool, standalone Preferences, saved-conversation, multi-provider, and voice-beta feature set while substantially reducing repeated world scans, component traversal, reflection, history serialization, menu allocations, and microphone allocations. Actual gains vary by scene and command; the largest improvements apply to repeated world inspection and multi-step actions.
+BoneAI supports Windows PCVR and includes a standalone-Quest build for LemonLoader. Codex remains the default. Version 2.5 adds a Hermes-style browser login: choose **Sign In With Codex**, enter the displayed one-time code in the browser, and return to BONELAB. BoneAI detects the completed login automatically. It retains the complete v2.4 350-tool, Fusion, SpawnLab, saved-conversation, multi-provider, voice-beta, and performance feature set.
 
 ## Start here
 
@@ -25,8 +25,8 @@ BoneAI is a Windows PCVR MelonLoader/BoneLib mod. Codex remains the default and 
 - BONELAB PCVR `1.744.58126`
 - MelonLoader `0.7.3` using the .NET 6 runtime
 - BoneLib `3.2.2`
-- Python 3 available as `python`, `python.exe`, or `py`
-- The Codex desktop app or Codex CLI, signed in with your ChatGPT account
+- Python 3 available as `python`, `python.exe`, or `py` (PCVR only)
+- Codex CLI/App Server on the same PC, or on a securely reachable PC/server for Quest
 - LabFusion `1.14.2` for multiplayer features (optional for offline play)
 - SpawnLab `1.0.1` for spawning (BoneAI still loads without it, but spawn tools report that the provider is unavailable)
 
@@ -37,9 +37,11 @@ Only BoneAI's own files are included in this repository and release. BoneLib, Fu
 1. Download the latest `BoneAI-v*.zip` from Releases.
 2. Open the ZIP. You will see `Mods` and `UserLibs` folders.
 3. Drag both folders into your BONELAB folder and allow Windows to merge them.
-4. Make sure Codex is installed, open it once, and sign in.
+4. Make sure Codex is installed. You do not need to sign in before opening BONELAB.
 5. Start BONELAB.
-6. Open BONELAB **Preferences → BoneAI → Assistant**, type into **Prompt**, and select **Send**.
+6. Open **Preferences → BoneAI → Codex Sign-In → Sign In With Codex**.
+7. BoneAI copies the one-time code and opens the official sign-in page. Enter the code, sign in, and return to BONELAB.
+8. Open **Assistant**, type into **Prompt**, and select **Send**.
 
 That is the complete BoneAI install. You do not need to launch the bridge yourself: `BoneAI.dll` automatically starts the adjacent `start_boneai_bridge.py` helper when BONELAB launches.
 
@@ -74,6 +76,28 @@ Use **Preferences → BoneAI → AI Provider**, choose **Change Provider**, edit
 Set keys as Windows user environment variables, then restart BONELAB. BoneAI never saves or logs them. Claude uses Anthropic's native Messages/tool-use protocol. Grok, DeepSeek, OpenRouter, Ollama, and Custom use their documented OpenAI-compatible function-calling protocol. The chosen model must support tools; OpenRouter support depends on the routed model, and Ollama requires the named model to be installed locally.
 
 Codex is the only provider that uses account login. Consumer Claude/Grok/DeepSeek logins are not reused because their official third-party API authentication uses API keys.
+
+## Codex browser sign-in
+
+BoneAI uses Codex App Server's official `chatgptDeviceCode` login flow. The game receives only a verification URL and one-time code. Your password, ChatGPT session, and resulting OAuth tokens remain inside Codex App Server and are never returned to or stored by BoneAI.
+
+1. Open **Preferences → BoneAI → Codex Sign-In**.
+2. Choose **Sign In With Codex**.
+3. BoneAI copies the code and opens the official Codex device sign-in page in the system browser.
+4. Finish signing in and return to BONELAB. The status changes to **Connected: Codex** without a restart.
+
+Use **Open Sign-In Page Again** if the browser was closed. **Sign Out** signs the connected Codex App Server out. A secure connection token entered in-game is held in memory for the current game session only and is never written to preferences or logs.
+
+## Standalone Quest setup
+
+The mod and its game actions run on the headset under LemonLoader. Codex App Server itself is a host program and is not distributed as an Android/Quest runtime, so the headset connects to Codex App Server running on a PC or server. Browser login alone cannot replace that host process. The browser performs account authorization while the trusted backend retains the credentials.
+
+1. Install the Quest build of BoneAI with LemonLoader and Quest-compatible BoneLib/Fusion/SpawnLab versions matching your BONELAB patch.
+2. Run Codex App Server on a PC/server reachable through a trusted HTTPS/WSS endpoint, with App Server capability-token authentication enabled.
+3. In **BoneAI → Codex Sign-In**, set the `wss://` App Server address and enter its connection token.
+4. Choose **Sign In With Codex**. Quest opens its browser, the code is entered once, and returning to BONELAB completes the connection.
+
+BoneAI refuses unencrypted remote `ws://` by default. **Allow Insecure Private LAN** exists for isolated testing only and should not be used on public or shared networks. Quest never attempts to launch Python. The Quest build is compiled as a managed AnyCPU DLL; because Quest game assemblies and installed mod versions must match, validate it against your headset's exact BONELAB/LemonLoader setup before public distribution.
 
 ## Updating
 
@@ -149,13 +173,13 @@ BoneAI does not accept remote AI commands. Other players, player names, chat, ma
 
 ## Connection and privacy
 
-For Codex, the Python helper uses only Python's standard library. It finds the installed Codex executable, starts:
+On PCVR, the Python helper uses only Python's standard library. It finds the installed Codex executable and starts:
 
 ```text
 codex app-server --listen ws://127.0.0.1:4500
 ```
 
-and stops it when BONELAB exits. The connection is localhost-only. Authentication remains inside Codex; BoneAI does not read, store, or log passwords, OAuth tokens, or API keys.
+and stops it when BONELAB exits. The default PC connection is localhost-only. Account authentication remains inside Codex. BoneAI sees device-login status but never reads, stores, or logs passwords or OAuth tokens. Remote transport bearer tokens are session-only.
 
 BoneAI's tool surface is limited to its registered BONELAB actions. It does not provide prompts with shell access, arbitrary process execution, arbitrary filesystem access, credential access, DLL loading, or unrestricted web requests.
 
@@ -163,10 +187,10 @@ BoneAI's tool surface is limited to its registered BONELAB actions. It does not 
 
 ### Connection says unavailable
 
-- Open Codex and confirm you are signed in.
+- Open **BoneAI → Codex Sign-In** and choose **Sign In With Codex**.
 - Confirm Python 3 is installed and available from the command line.
 - Confirm `start_boneai_bridge.py` is beside `BoneAI.dll` in `Mods`.
-- Select **Reconnect** in **Preferences → BoneAI → AI Provider**.
+- Select **Reconnect** in **Preferences → BoneAI → Codex Sign-In**.
 - Search `MelonLoader/Latest.log` for `[BoneAI]`.
 
 ### The Python bridge exits with code 1

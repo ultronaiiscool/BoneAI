@@ -20,6 +20,7 @@ public sealed class AgentMenu
     private StringElement? _response;
     private StringElement? _voiceStatus;
     private StringElement? _transcript;
+    private StringElement? _loginCode;
     private GameObject? _nativeButton;
     private float _nextRefresh;
     private int _conversationCount = -1;
@@ -61,6 +62,17 @@ public sealed class AgentMenu
         provider.CreateFunction("Reconnect", Color.green, () => _ = _mod.Conversation.ConnectAsync());
         provider.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
 
+        var codex = _root.CreatePage("Codex Sign-In", new Color(0.18f, 0.72f, 1f), 9);
+        codex.CreateString("App Server Address", Color.white, _mod.Config.Endpoint.Value, v => _mod.Config.Endpoint.Value = v.Trim());
+        codex.CreateString("Secure Connection Token", Color.white, string.Empty, SetTransportToken);
+        _loginCode = codex.CreateString("One-Time Code", Color.white, "Not started", _ => { });
+        codex.CreateFunction("Sign In With Codex", Color.green, () => _ = SignInWithCodexAsync());
+        codex.CreateFunction("Open Sign-In Page Again", Color.cyan, OpenLoginPage);
+        codex.CreateFunction("Reconnect", Color.white, () => _ = _mod.Conversation.ConnectAsync());
+        codex.CreateFunction("Sign Out", Color.red, () => _ = _mod.Conversation.LogoutCodexAsync());
+        Bind(codex, "Allow Insecure Private LAN", _mod.Config.AllowInsecureRemoteCodex);
+        codex.CreateFunction("Quest Connection Help", Color.yellow, () => Notify("Quest Codex", "Quest cannot run Codex App Server itself. Enter the secure wss:// address and connection token for Codex running on your PC, then choose Sign In With Codex."));
+
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
         permissions.CreateFunction("Enable All Game Controls", Color.green, EnableAll);
         Bind(permissions, "Agent Enabled", _mod.Config.Enabled);
@@ -92,6 +104,7 @@ public sealed class AgentMenu
         if (_response != null) _response.Value = Trim(_mod.Conversation.LastResponse, 120);
         if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.Voice.Status, 100);
         if (_transcript != null) _transcript.Value = Trim(_mod.Voice.LastTranscript, 100);
+        if (_loginCode != null) _loginCode.Value = string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginCode) ? (_mod.Conversation.CodexSignedIn ? "Signed in" : "Not signed in") : _mod.Conversation.DeviceLoginCode;
         if (_conversationCount != _mod.Conversation.SavedConversationCount) BuildConversations();
     }
 
@@ -137,6 +150,36 @@ public sealed class AgentMenu
 
     private void SendPrompt() { var value = _prompt?.Value ?? string.Empty; if (string.IsNullOrWhiteSpace(value)) return; if (_prompt != null) _prompt.Value = string.Empty; _ = _mod.Conversation.SendAsync(value); }
     private void ShowResponse() => Notify("BoneAI", Trim(_mod.Conversation.LastResponse, 480));
+    private void SetTransportToken(string value)
+    {
+        Infrastructure.RuntimeSecrets.CodexTransportToken = value;
+        Notify("BoneAI", string.IsNullOrWhiteSpace(value) ? "Secure connection token cleared." : "Secure connection token set for this game session.");
+    }
+    private async Task SignInWithCodexAsync()
+    {
+        try
+        {
+            var login = await _mod.Conversation.StartCodexDeviceLoginAsync().ConfigureAwait(false);
+            await _mod.Dispatcher.InvokeAsync(() =>
+            {
+                GUIUtility.systemCopyBuffer = login.UserCode;
+                Notify("Codex Sign-In", "Code " + login.UserCode + " copied. Paste it in the browser, finish signing in, then return to BONELAB.");
+                Application.OpenURL(login.VerificationUrl);
+                return true;
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.AgentLog.Exception("Codex sign-in", ex);
+            await _mod.Dispatcher.InvokeAsync(() => { Notify("Codex Sign-In Failed", ex.GetBaseException().Message); return true; }).ConfigureAwait(false);
+        }
+    }
+    private void OpenLoginPage()
+    {
+        if (string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginUrl)) { Notify("Codex Sign-In", "Choose Sign In With Codex first."); return; }
+        GUIUtility.systemCopyBuffer = _mod.Conversation.DeviceLoginCode;
+        Application.OpenURL(_mod.Conversation.DeviceLoginUrl);
+    }
     private void EnableAll() { _mod.Config.Enabled.Value = _mod.Config.AllowActions.Value = _mod.Config.AllowPlayerModification.Value = _mod.Config.AllowSpawning.Value = _mod.Config.AllowCombat.Value = _mod.Config.FusionSynchronization.Value = true; Notify("BoneAI", "All game controls enabled."); }
     private void CycleProvider() { var names = AI.ProviderCatalog.Names; var at = Array.FindIndex(names, x => x.Equals(_mod.Config.Provider.Value, StringComparison.OrdinalIgnoreCase)); var next = names[(at + 1 + names.Length) % names.Length]; _mod.Config.Provider.Value = next; _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel(next); _mod.Config.ProviderBaseUrl.Value = string.Empty; Notify("BoneAI provider", next); _ = _mod.Conversation.ConnectAsync(); }
     private static void Notify(string title, string message) => Notifier.Send(new Notification { Title = title, Message = message, ShowTitleOnPopup = true, PopupLength = 7, Type = NotificationType.Information });

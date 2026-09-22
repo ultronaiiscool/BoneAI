@@ -21,30 +21,71 @@ public sealed class CodexAppServerClient : IAgentClient
     private readonly HashSet<string> _finalMessageIds = new(StringComparer.Ordinal);
     private bool _sawFinalAnswer;
     private TaskCompletionSource<string>? _turn;
+    private TaskCompletionSource<bool>? _loginCompletion;
 
     public bool Connected => _socket?.State == WebSocketState.Open;
     public bool NativeToolsEnabled { get; private set; }
     public string? ThreadId { get; private set; }
     public event Action<string>? StatusChanged;
     public event Action<string>? DeltaReceived;
+    public event Action<bool, string?>? LoginCompleted;
 
     public CodexAppServerClient(ToolRegistry tools) => _tools = tools;
 
     public async Task ConnectAsync(string endpoint, CancellationToken cancellationToken)
     {
         DisposeSocket();
+        var uri = new Uri(endpoint);
+        var isLoopback = uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+        if (!isLoopback && uri.Scheme != "wss" && !BoneAIMod.Instance.Config.AllowInsecureRemoteCodex.Value)
+            throw new InvalidOperationException("Remote Codex requires wss://. Enable insecure LAN Codex only for a trusted private network.");
         _socket = new ClientWebSocket();
+        if (!string.IsNullOrWhiteSpace(RuntimeSecrets.CodexTransportToken))
+            _socket.Options.SetRequestHeader("Authorization", "Bearer " + RuntimeSecrets.CodexTransportToken);
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         StatusChanged?.Invoke("Connecting");
-        await _socket.ConnectAsync(new Uri(endpoint), cancellationToken).ConfigureAwait(false);
+        await _socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.4.0" },
+            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.5.0" },
             ["capabilities"] = new JObject { ["experimentalApi"] = true }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);
         StatusChanged?.Invoke("Connected");
+    }
+
+    public async Task<bool> IsAccountSignedInAsync(CancellationToken cancellationToken)
+    {
+        var response = await RequestAsync("account/read", new JObject(), cancellationToken).ConfigureAwait(false);
+        return response.SelectToken("result.account") is JObject;
+    }
+
+    public async Task<CodexDeviceLogin> BeginDeviceLoginAsync(CancellationToken cancellationToken)
+    {
+        _loginCompletion?.TrySetCanceled();
+        _loginCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = await RequestAsync("account/login/start", new JObject { ["type"] = "chatgptDeviceCode" }, cancellationToken).ConfigureAwait(false);
+        var result = response["result"] as JObject ?? throw new InvalidOperationException("Codex returned no device-login result.");
+        var login = new CodexDeviceLogin(
+            result["loginId"]?.Value<string>() ?? throw new InvalidOperationException("Codex returned no login ID."),
+            result["verificationUrl"]?.Value<string>() ?? throw new InvalidOperationException("Codex returned no verification URL."),
+            result["userCode"]?.Value<string>() ?? throw new InvalidOperationException("Codex returned no device code."));
+        StatusChanged?.Invoke("Waiting for Codex browser sign-in");
+        return login;
+    }
+
+    public async Task CancelDeviceLoginAsync(string loginId, CancellationToken cancellationToken)
+    {
+        await RequestAsync("account/login/cancel", new JObject { ["loginId"] = loginId }, cancellationToken).ConfigureAwait(false);
+        _loginCompletion?.TrySetCanceled(cancellationToken);
+    }
+
+    public async Task LogoutAsync(CancellationToken cancellationToken)
+    {
+        await RequestAsync("account/logout", new JObject(), cancellationToken).ConfigureAwait(false);
+        ThreadId = null;
+        StatusChanged?.Invoke("Signed out");
     }
 
     public async Task StartThreadAsync(string? resumeThreadId, CancellationToken cancellationToken)
@@ -161,6 +202,17 @@ public sealed class CodexAppServerClient : IAgentClient
             _ = HandleDynamicToolCallAsync(message);
             return;
         }
+        if (method == "account/login/completed")
+        {
+            var success = message.SelectToken("params.success")?.Value<bool?>()
+                          ?? message.SelectToken("params.status")?.Value<string>()?.Equals("success", StringComparison.OrdinalIgnoreCase)
+                          ?? message.SelectToken("params.error") == null;
+            var error = message.SelectToken("params.error.message")?.Value<string>() ?? message.SelectToken("params.error")?.Value<string>();
+            if (success) _loginCompletion?.TrySetResult(true); else _loginCompletion?.TrySetException(new InvalidOperationException(error ?? "Codex sign-in failed."));
+            StatusChanged?.Invoke(success ? "Codex sign-in complete" : "Codex sign-in failed");
+            LoginCompleted?.Invoke(success, error);
+            return;
+        }
         if (message["id"]?.Value<long?>() is long id && _requests.TryRemove(id, out var request))
         {
             if (message["error"] != null) request.TrySetException(new InvalidOperationException(message["error"]!.ToString(Formatting.None)));
@@ -235,3 +287,5 @@ public sealed class CodexAppServerClient : IAgentClient
 
     public void Dispose() { DisposeSocket(); _sendGate.Dispose(); }
 }
+
+public sealed record CodexDeviceLogin(string LoginId, string VerificationUrl, string UserCode);

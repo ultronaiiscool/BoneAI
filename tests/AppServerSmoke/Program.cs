@@ -12,9 +12,14 @@ try
     await Task.Delay(1200);
     using var socket = new ClientWebSocket();
     await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
-    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "2.4.0" }, capabilities = new { experimentalApi = true } });
+    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "2.5.0" }, capabilities = new { experimentalApi = true } });
     Console.WriteLine(await Response(1));
     await Raw(new { method = "initialized", @params = new { } });
+    await Send(99, "account/read", new { });
+    var account = await Response(99);
+    Console.WriteLine(account);
+    if (!account.Contains("\"account\"")) throw new Exception("account/read did not return account state.");
+    if (args.Length > 1 && args[1] == "--account-only") return;
     await Send(2, "thread/start", new { baseInstructions = "Game tools only.", developerInstructions = "Do not use system tools.", sandbox = "read-only", approvalPolicy = "never", dynamicTools = new object[] { new { type = "namespace", name = "avatar", description = "Avatar tools", tools = new object[] { new { type = "function", name = "find", description = "Find an avatar", inputSchema = new { type = "object", additionalProperties = true } } } } } });
     var response = await Response(2);
     Console.WriteLine(response);
