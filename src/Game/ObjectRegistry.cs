@@ -18,6 +18,10 @@ public sealed class ObjectRegistry
     }
     public void Prune()
     {
-        foreach (var id in _objects.Where(x => x.Value == null).Select(x => x.Key).ToArray()) _objects.Remove(id);
+        List<string>? expired = null;
+        foreach (var item in _objects)
+            if (item.Value == null) (expired ??= new List<string>()).Add(item.Key);
+        if (expired == null) return;
+        foreach (var id in expired) _objects.Remove(id);
     }
 }

@@ -17,6 +17,8 @@ public sealed class FusionBridge
     private Type? _networkPlayer;
     private Type? _playerSender;
     private Type? _localAvatar;
+    private IReadOnlyList<PlayerSnapshot> _playerCache = Array.Empty<PlayerSnapshot>();
+    private float _playerCacheExpiresAt;
 
     public bool IsAvailable => _assembly != null;
     public bool IsOnline
@@ -48,6 +50,7 @@ public sealed class FusionBridge
 
     public IReadOnlyList<PlayerSnapshot> GetPlayerSnapshots()
     {
+        if (Time.unscaledTime < _playerCacheExpiresAt) return _playerCache;
         var output = new List<PlayerSnapshot>();
         if (_networkPlayer?.GetField("Players", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is not IEnumerable players)
             return output;
@@ -84,6 +87,8 @@ public sealed class FusionBridge
                 AgentLog.Debug("Skipped stale Fusion player during rig transition: " + ex.GetBaseException().Message);
             }
         }
+        _playerCache = output;
+        _playerCacheExpiresAt = Time.unscaledTime + 0.25f;
         return output;
     }
 

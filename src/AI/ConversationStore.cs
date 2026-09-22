@@ -20,12 +20,15 @@ public sealed class ConversationStore
     private readonly string _path = Path.Combine(MelonEnvironment.UserDataDirectory, "BoneAI", "conversations.json");
     private readonly object _gate = new();
     private List<SavedConversation> _items = new();
+    private SavedConversation[]? _snapshot;
+
+    public int Count { get { lock (_gate) return _items.Count; } }
 
     public ConversationStore() => Load();
 
     public IReadOnlyList<SavedConversation> List()
     {
-        lock (_gate) return _items.OrderByDescending(x => x.UpdatedUtc).Select(Clone).ToArray();
+        lock (_gate) return _snapshot ??= _items.OrderByDescending(x => x.UpdatedUtc).Select(Clone).ToArray();
     }
 
     public void Touch(string id, string provider, string? title = null, string? preview = null)
@@ -38,6 +41,7 @@ public sealed class ConversationStore
             if (!string.IsNullOrWhiteSpace(title) && item.Title == "New conversation") item.Title = Trim(title, 56);
             if (preview != null) item.Preview = Trim(preview, 120);
             item.UpdatedUtc = DateTime.UtcNow;
+            _snapshot = null;
             Save();
         }
     }

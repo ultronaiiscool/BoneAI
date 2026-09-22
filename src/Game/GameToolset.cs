@@ -19,6 +19,13 @@ namespace BoneAI.Game;
 public sealed class GameToolset
 {
     private sealed record AvatarEntry(string title, string barcode, string pallet, string provider);
+    private sealed record ComponentSnapshot(GameObject Object, Component[] Components, string[] TypeNames, bool IsNpc, bool IsInteractable, float ExpiresAt);
+    private sealed record SemanticSnapshot(GameObject Object, bool Value, float ExpiresAt);
+
+    private static readonly HashSet<string> NpcTypes = new(new[] { "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Enemy_Health" }, StringComparer.Ordinal);
+    private static readonly HashSet<string> InteractableTypes = new(new[] { "Grip", "Gun", "Seat", "ButtonNode", "LeverNode", "MarrowEntity" }, StringComparer.Ordinal);
+    private static readonly HashSet<string> CompactTypes = new(new[] { "Rigidbody", "Grip", "Gun", "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Seat", "ButtonNode", "LeverNode", "MarrowEntity", "Poolee" }, StringComparer.Ordinal);
+    private static readonly HashSet<string> SemanticTypes = new(NpcTypes.Concat(InteractableTypes).Concat(new[] { "Poolee" }), StringComparer.Ordinal);
 
     private readonly AgentConfig _config;
     private readonly FusionBridge _fusion;
@@ -30,6 +37,17 @@ public sealed class GameToolset
     private string? _followObject;
     private float _moveSpeed = 2.5f;
     private bool _avatarCatalogLogged;
+    private readonly Dictionary<int, ComponentSnapshot> _componentCache = new();
+    private readonly Dictionary<int, SemanticSnapshot> _semanticCache = new();
+    private List<GameObject> _nearbyCache = new();
+    private Vector3 _nearbyCenter;
+    private float _nearbyRadius;
+    private float _nearbyExpiresAt;
+    private int _cachedScene = int.MinValue;
+    private long _worldScans;
+    private long _worldCacheHits;
+    private double _worldScanMilliseconds;
+    private float _nextObjectPrune;
 
     public GameToolset(AgentConfig config, FusionBridge fusion)
     {
@@ -126,6 +144,7 @@ public sealed class GameToolset
         Register(r, "mods.list_loaded", "List loaded MelonLoader mod assemblies and versions.", LoadedMods);
         Register(r, "mods.get_capabilities", "List useful capabilities discovered in the user's installed mod DLLs and whether the AI integrates them.", ModCapabilities);
         Register(r, "logs.get_recent_errors", "Read recent error/exception lines from the current MelonLoader log. optional arguments: limit.", RecentErrors);
+        Register(r, "diagnostics.performance", "Get BoneAI world-query cache hits, physical scans, cache size, and average scan time.", PerformanceDiagnostics);
         Register(r, "ui.notify", "Show an in-headset BoneLib notification. arguments: message.", Notify);
         RegisterExpandedTools(r);
     }
@@ -216,7 +235,7 @@ public sealed class GameToolset
             Register(r, "world.scan_radius_" + captured, $"List compact world objects within exactly {captured} meters. optional argument: limit.", c => ScanPreset(c, captured));
         }
 
-        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.3.");
+        AgentLog.Info($"Registered {r.Count} structured BONELAB tools for BoneAI v2.4.");
     }
 
     private ToolResult FindByComponent(ToolCall c, string component)
@@ -224,7 +243,7 @@ public sealed class GameToolset
         var radius = c.Arguments["radius"]?.Value<float>() ?? _config.WorldQueryRadius.Value;
         var limit = Math.Clamp(c.Arguments["limit"]?.Value<int>() ?? 30, 1, 100);
         var query = c.Arguments["query"]?.Value<string>() ?? string.Empty;
-        var matches = NearbyObjects(radius, 500).Where(go => go.GetComponentsInChildren<Component>().Any(x => x.GetType().Name.Equals(component, StringComparison.OrdinalIgnoreCase)))
+        var matches = NearbyObjects(radius, 500).Where(go => Components(go).TypeNames.Any(x => x.Equals(component, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(go => Score(go.name, query)).ThenBy(go => Vector3.Distance(Player.Head?.transform.position ?? Vector3.zero, go.transform.position)).Take(limit).Select(go => Describe(go, true)).ToArray();
         return ToolResult.Success(c, new { component, count = matches.Length, matches });
     }
@@ -634,6 +653,14 @@ public sealed class GameToolset
     }
     private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=c.Arguments["limit"]?.Value<int>()??40;var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).ToArray();return ToolResult.Success(c,lines);}
     private ToolResult Notify(ToolCall c){Notifier.Send(new Notification{Title="BoneAI",Message=Str(c,"message"),ShowTitleOnPopup=true,Type=NotificationType.Information,PopupLength=4});return ToolResult.Success(c);}
+    private ToolResult PerformanceDiagnostics(ToolCall c) => ToolResult.Success(c, new
+    {
+        physicalWorldScans = _worldScans,
+        cacheHits = _worldCacheHits,
+        hitRatePercent = _worldScans + _worldCacheHits == 0 ? 0 : Math.Round(100d * _worldCacheHits / (_worldScans + _worldCacheHits), 1),
+        averagePhysicalScanMs = _worldScans == 0 ? 0 : Math.Round(_worldScanMilliseconds / _worldScans, 3),
+        cachedObjects = _componentCache.Count
+    });
 
     public void Update()
     {
@@ -643,25 +670,38 @@ public sealed class GameToolset
             try { AgentLog.Info($"Combined avatar catalog ready with {AvatarCatalog().Count()} avatars."); }
             catch (Exception ex) { AgentLog.Warn("Avatar catalog validation failed: " + ex.GetBaseException().Message); }
         }
-        _objects.Prune(); if(_followObject!=null&&_objects.TryGet(_followObject,out var target))_moveDestination=target.transform.position-target.transform.forward*1.5f;
+        if (Time.unscaledTime >= _nextObjectPrune) { _objects.Prune(); _nextObjectPrune = Time.unscaledTime + 2f; }
+        if(_followObject!=null&&_objects.TryGet(_followObject,out var target))_moveDestination=target.transform.position-target.transform.forward*1.5f;
         if(_moveDestination is not Vector3 destination||Player.RigManager==null)return; var rig=Player.RigManager;var current=rig.transform.position;var flat=new Vector3(destination.x,current.y,destination.z);if(Vector3.Distance(current,flat)<0.15f){if(_followObject==null)_moveDestination=null;return;}var next=Vector3.MoveTowards(current,flat,_moveSpeed*Time.deltaTime);rig.Teleport(next,rig.transform.eulerAngles,true);
     }
 
     private List<GameObject> NearbyObjects(float radius,int limit)
     {
+        EnsureSceneCache();
         var center = Player.Head?.transform.position ?? Vector3.zero;
+        radius = Mathf.Clamp(radius, 0.5f, 50f);
+        limit = Math.Clamp(limit, 1, 500);
+        if (Time.unscaledTime < _nearbyExpiresAt && radius <= _nearbyRadius && Vector3.SqrMagnitude(center - _nearbyCenter) < 0.25f)
+        {
+            _worldCacheHits++;
+            return _nearbyCache.Where(x => x != null && Vector3.SqrMagnitude(x.transform.position - center) <= radius * radius).Take(limit).ToList();
+        }
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var seen = new HashSet<int>();
         var result = new List<GameObject>();
-        foreach (var hit in Physics.OverlapSphere(center, Mathf.Clamp(radius, 0.5f, 50f)))
+        foreach (var hit in Physics.OverlapSphere(center, radius))
         {
             var go = CanonicalObject(hit);
             if (seen.Add(go.GetInstanceID())) result.Add(go);
         }
-        return result.OrderBy(x => Vector3.Distance(center, x.transform.position)).Take(Math.Clamp(limit, 1, 500)).ToList();
+        result.Sort((a, b) => Vector3.SqrMagnitude(a.transform.position - center).CompareTo(Vector3.SqrMagnitude(b.transform.position - center)));
+        _nearbyCenter = center; _nearbyRadius = radius; _nearbyExpiresAt = Time.unscaledTime + 0.25f; _nearbyCache = result;
+        _worldScans++; _worldScanMilliseconds += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d / System.Diagnostics.Stopwatch.Frequency;
+        return result.Take(limit).ToList();
     }
     private object[] CompactNearby(float radius,int limit)=>NearbyObjects(radius,limit).Select(x=>Describe(x)).ToArray();
-    private object Describe(GameObject go,bool detailed=false){var types=go.GetComponentsInChildren<Component>().Select(x=>x.GetType().Name).Distinct().Where(x=>detailed||new[]{"Rigidbody","Grip","Gun","PuppetMaster","BehaviourBaseNav","AIBrain","Seat","ButtonNode","LeverNode","MarrowEntity","Poolee"}.Contains(x)).Take(detailed?30:10).ToArray();var head=Player.Head?.transform.position??Vector3.zero;return new{id=_objects.Register(go),name=go.name,position=V(go.transform.position),distance=Math.Round(Vector3.Distance(head,go.transform.position),2),kind=IsNpc(go)?"npc":_fusion.TryGetPlayerId(go,out _)?"fusionPlayer":IsInteractable(go)?"interactable":"object",types};}
-    private static GameObject CanonicalObject(Collider hit)
+    private object Describe(GameObject go,bool detailed=false){var info=Components(go);var types=info.TypeNames.Where(x=>detailed||CompactTypes.Contains(x)).Take(detailed?30:10).ToArray();var head=Player.Head?.transform.position??Vector3.zero;return new{id=_objects.Register(go),name=go.name,position=V(go.transform.position),distance=Math.Round(Vector3.Distance(head,go.transform.position),2),kind=info.IsNpc?"npc":_fusion.TryGetPlayerId(go,out _)?"fusionPlayer":info.IsInteractable?"interactable":"object",types};}
+    private GameObject CanonicalObject(Collider hit)
     {
         if (hit.attachedRigidbody != null) return hit.attachedRigidbody.gameObject;
         var current = hit.transform;
@@ -674,9 +714,33 @@ public sealed class GameToolset
         }
         return best;
     }
-    private static bool HasSemanticComponent(GameObject go) => go.GetComponents<Component>().Any(x => new[] { "MarrowEntity", "Poolee", "Grip", "Gun", "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Seat", "ButtonNode", "LeverNode" }.Contains(x.GetType().Name));
-    private static bool IsNpc(GameObject go) => go.GetComponentsInChildren<Component>().Any(x => new[] { "PuppetMaster", "BehaviourBaseNav", "AIBrain", "Enemy_Health" }.Contains(x.GetType().Name));
-    private static bool IsInteractable(GameObject go) => go.GetComponentsInChildren<Component>().Any(x => new[] { "Grip", "Gun", "Seat", "ButtonNode", "LeverNode", "MarrowEntity" }.Contains(x.GetType().Name));
+    private bool HasSemanticComponent(GameObject go)
+    {
+        var id = go.GetInstanceID();
+        if (_semanticCache.TryGetValue(id, out var cached) && cached.Object == go && Time.unscaledTime < cached.ExpiresAt) return cached.Value;
+        var value = go.GetComponents<Component>().Any(x => x != null && SemanticTypes.Contains(x.GetType().Name));
+        _semanticCache[id] = new SemanticSnapshot(go, value, Time.unscaledTime + 1f);
+        return value;
+    }
+    private ComponentSnapshot Components(GameObject go)
+    {
+        EnsureSceneCache();
+        var id = go.GetInstanceID();
+        if (_componentCache.TryGetValue(id, out var cached) && cached.Object == go && Time.unscaledTime < cached.ExpiresAt) return cached;
+        var components = go.GetComponentsInChildren<Component>();
+        var names = components.Where(x => x != null).Select(x => x.GetType().Name).Distinct().ToArray();
+        var snapshot = new ComponentSnapshot(go, components, names, names.Any(NpcTypes.Contains), names.Any(InteractableTypes.Contains), Time.unscaledTime + 1f);
+        _componentCache[id] = snapshot;
+        return snapshot;
+    }
+    private bool IsNpc(GameObject go) => Components(go).IsNpc;
+    private bool IsInteractable(GameObject go) => Components(go).IsInteractable;
+    private void EnsureSceneCache()
+    {
+        var scene = SceneManager.GetActiveScene().buildIndex;
+        if (scene == _cachedScene) return;
+        _cachedScene = scene; _componentCache.Clear(); _semanticCache.Clear(); _nearbyCache.Clear(); _nearbyExpiresAt = 0;
+    }
     private IEnumerable<(string title,string barcode,string source,string category,bool downloaded)> SpawnCatalog()=>_spawnLab.GetEntries().Select(x=>(x.Title,x.Barcode,x.Source,x.Category,x.Downloaded));
     private static int Score(string value,string query){if(string.IsNullOrWhiteSpace(query))return 0;value=value.ToLowerInvariant();query=query.ToLowerInvariant();if(value==query)return 0;if(value.Contains(query))return 1+value.IndexOf(query);return Levenshtein(value,query)+20;}
     private static int Levenshtein(string a,string b){var d=new int[b.Length+1];for(var j=0;j<=b.Length;j++)d[j]=j;for(var i=1;i<=a.Length;i++){var prev=d[0];d[0]=i;for(var j=1;j<=b.Length;j++){var old=d[j];d[j]=Math.Min(Math.Min(d[j]+1,d[j-1]+1),prev+(a[i-1]==b[j-1]?0:1));prev=old;}}return d[b.Length];}
@@ -692,7 +756,7 @@ public sealed class GameToolset
     private static string HandName(ToolCall c)=>(c.Arguments["hand"]?.Value<string>()??"right").ToLowerInvariant();
     private static GameObject? HeldObject(Hand hand)=>hand.m_CurrentAttachedGO;
     private static string? HeldName(Hand? hand)=>hand==null?null:HeldObject(hand)?.name;
-    private static Component? FindComponentByName(GameObject go,string name)=>go.GetComponentsInChildren<Component>().FirstOrDefault(x=>x.GetType().Name==name);
+    private Component? FindComponentByName(GameObject go,string name)=>Components(go).Components.FirstOrDefault(x=>x!=null&&x.GetType().Name==name);
     private static string Str(ToolCall c,string key)=>c.Arguments[key]?.Value<string>()??throw new ArgumentException("Missing string argument: "+key);
     private static float Num(ToolCall c,string key)=>c.Arguments[key]?.Value<float>()??throw new ArgumentException("Missing numeric argument: "+key);
     private static Attack CreateAttack(float amount, Vector3 origin, Vector3 direction) => new()

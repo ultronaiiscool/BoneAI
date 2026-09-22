@@ -92,7 +92,7 @@ public sealed class AgentMenu
         if (_response != null) _response.Value = Trim(_mod.Conversation.LastResponse, 120);
         if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.Voice.Status, 100);
         if (_transcript != null) _transcript.Value = Trim(_mod.Voice.LastTranscript, 100);
-        if (_conversationCount != _mod.Conversation.SavedConversations.Count) BuildConversations();
+        if (_conversationCount != _mod.Conversation.SavedConversationCount) BuildConversations();
     }
 
     private void AddPreferencesButton()

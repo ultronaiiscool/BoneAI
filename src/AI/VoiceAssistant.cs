@@ -22,6 +22,8 @@ public sealed class VoiceAssistant : IDisposable
     private bool _heardSpeech;
     private bool _busy;
     private bool _listenOnce;
+    private Il2CppStructArray<float>? _pollSamples;
+    private float _nextStartAttempt;
 
     public string Status { get; private set; } = "Voice beta off";
     public string LastTranscript { get; private set; } = string.Empty;
@@ -38,16 +40,17 @@ public sealed class VoiceAssistant : IDisposable
     {
         if (!_config.VoiceBetaEnabled.Value) { Stop(); Status = "Voice beta off"; return; }
         if (_busy) return;
-        if (_clip == null) { Start(); return; }
+        if (_clip == null) { if (Time.unscaledTime >= _nextStartAttempt) Start(); return; }
         if (Time.unscaledTime < _lastPoll + 0.1f) return;
         var elapsed = Time.unscaledTime - _lastPoll; _lastPoll = Time.unscaledTime;
         var position = Microphone.GetPosition(Device());
         if (position <= _lastPosition) return;
         var count = Math.Min(position - _lastPosition, 4096);
-        var samples = new Il2CppStructArray<float>(count * Math.Max(1, _clip.channels));
-        if (!_clip.GetData(samples, position - count)) return;
+        var sampleCount = count * Math.Max(1, _clip.channels);
+        _pollSamples ??= new Il2CppStructArray<float>(4096 * Math.Max(1, _clip.channels));
+        if (!_clip.GetData(_pollSamples, position - count)) return;
         var peak = 0f;
-        for (var i = 0; i < samples.Length; i++) peak = Math.Max(peak, Math.Abs(samples[i]));
+        for (var i = 0; i < sampleCount; i++) peak = Math.Max(peak, Math.Abs(_pollSamples[i]));
         _lastPosition = position;
         if (peak >= _config.VoiceSilenceThreshold.Value) { _heardSpeech = true; _silentFor = 0; Status = "Hearing speech…"; }
         else if (_heardSpeech) _silentFor += elapsed;
@@ -60,8 +63,9 @@ public sealed class VoiceAssistant : IDisposable
         try
         {
             var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
-            if (string.IsNullOrWhiteSpace(key)) { Status = "Voice needs OPENAI_API_KEY"; return; }
+            if (string.IsNullOrWhiteSpace(key)) { Status = "Voice needs OPENAI_API_KEY"; _nextStartAttempt = Time.unscaledTime + 2f; return; }
             _clip = Microphone.Start(Device(), false, Math.Clamp(_config.VoiceMaxSeconds.Value, 3, 30), Rate);
+            _pollSamples = new Il2CppStructArray<float>(4096 * Math.Max(1, _clip.channels));
             _lastPosition = 0; _silentFor = 0; _heardSpeech = false; _lastPoll = Time.unscaledTime;
             Status = _listenOnce ? "Listening once…" : "Waiting for “" + _config.VoiceWakeWord.Value + "”…";
         }
@@ -160,7 +164,7 @@ public sealed class VoiceAssistant : IDisposable
     }
 
     private string Device() => string.IsNullOrWhiteSpace(_config.VoiceInputDevice.Value) ? null! : _config.VoiceInputDevice.Value;
-    private void Stop() { if (_clip != null) { try { Microphone.End(Device()); } catch { } _clip = null; } }
+    private void Stop() { if (_clip != null) { try { Microphone.End(Device()); } catch { } _clip = null; } _pollSamples = null; }
     private static string Trim(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";
     public void Dispose() { _conversation.ResponseCompleted -= OnResponse; Stop(); _http.Dispose(); }
 }

@@ -8,13 +8,17 @@ namespace BoneAI.Game;
 public sealed class SpawnLabBridge
 {
     public sealed record Entry(string Title, string Barcode, string Source, string Category, bool Downloaded, object NativeEntry);
+    private object? _mod;
+    private IReadOnlyList<Entry>? _entries;
+    private float _entriesExpireAt;
 
-    private object? FindMod() => MelonBase.RegisteredMelons.FirstOrDefault(x => x.GetType().FullName == "SpawnLab.SpawnLabMod");
+    private object? FindMod() => _mod ??= MelonBase.RegisteredMelons.FirstOrDefault(x => x.GetType().FullName == "SpawnLab.SpawnLabMod");
 
     public bool Available => FindMod() != null;
 
     public IReadOnlyList<Entry> GetEntries()
     {
+        if (_entries != null && UnityEngine.Time.unscaledTime < _entriesExpireAt) return _entries;
         var mod = FindMod();
         if (mod == null) return Array.Empty<Entry>();
         var field = mod.GetType().GetField("_entries", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -28,6 +32,8 @@ public sealed class SpawnLabBridge
             var downloaded = type.GetProperty("IsDownloaded")?.GetValue(entry) is true;
             output.Add(new Entry(Read("Title"), Read("Barcode"), Read("SourceName"), Read("Category"), downloaded, entry));
         }
+        _entries = output;
+        _entriesExpireAt = UnityEngine.Time.unscaledTime + 5f;
         return output;
     }
 
@@ -37,6 +43,7 @@ public sealed class SpawnLabBridge
         var method = mod.GetType().GetMethod("RebuildMenu", BindingFlags.Instance | BindingFlags.NonPublic)
                      ?? throw new MissingMethodException("SpawnLab.SpawnLabMod.RebuildMenu");
         method.Invoke(mod, null);
+        _entries = null; _entriesExpireAt = 0;
     }
 
     public Entry Spawn(string barcodeOrName)

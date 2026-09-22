@@ -70,7 +70,7 @@ public sealed class ApiProviderClient : IAgentClient
         {
             var messages = new JArray(new JObject { ["role"] = "system", ["content"] = SystemInstructions });
             foreach (var item in _history) messages.Add(item.DeepClone());
-            var selectedTools = _tools.SelectForPrompt(prompt + " " + _history.ToString(Formatting.None), ProviderCatalog.ToolLimit(_config.Provider.Value));
+            var selectedTools = _tools.SelectForPrompt(BuildSelectionContext(prompt), ProviderCatalog.ToolLimit(_config.Provider.Value));
             var body = new JObject
             {
                 ["model"] = _config.ProviderModel.Value,
@@ -112,7 +112,7 @@ public sealed class ApiProviderClient : IAgentClient
         PersistHistory();
         for (var round = 0; round < 12; round++)
         {
-            var selectedTools = _tools.SelectForPrompt(prompt + " " + _history.ToString(Formatting.None), ProviderCatalog.ToolLimit(_config.Provider.Value));
+            var selectedTools = _tools.SelectForPrompt(BuildSelectionContext(prompt), ProviderCatalog.ToolLimit(_config.Provider.Value));
             var body = new JObject
             {
                 ["model"] = _config.ProviderModel.Value,
@@ -158,15 +158,33 @@ public sealed class ApiProviderClient : IAgentClient
             request.Headers.Add("anthropic-version", "2023-06-01");
         }
         else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Headers.UserAgent.ParseAdd("BoneAI/2.3.0");
+        request.Headers.UserAgent.ParseAdd("BoneAI/2.4.0");
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
-        var json = JObject.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        JObject json;
+        try { json = JObject.Parse(raw); }
+        catch (JsonException ex) { throw new InvalidOperationException($"Provider HTTP {(int)response.StatusCode} returned non-JSON data: " + Trim(raw, 300), ex); }
         if (!response.IsSuccessStatusCode) throw ApiError($"Provider HTTP {(int)response.StatusCode}", json);
         return json;
     }
 
     private static Exception ApiError(string message, JObject payload)
         => new InvalidOperationException(message + ": " + (payload.SelectToken("error.message")?.Value<string>() ?? payload["error"]?.ToString(Formatting.None) ?? "invalid response"));
+
+    private string BuildSelectionContext(string prompt)
+    {
+        var builder = new StringBuilder(Math.Min(8192, prompt.Length + 2048));
+        builder.Append(prompt);
+        var start = Math.Max(0, _history.Count - 8);
+        for (var i = start; i < _history.Count && builder.Length < 8192; i++)
+        {
+            var text = _history[i]["content"]?.Type == JTokenType.String ? _history[i]["content"]!.Value<string>() : _history[i]["content"]?.ToString(Formatting.None);
+            if (!string.IsNullOrWhiteSpace(text)) builder.Append(' ').Append(Trim(text!, Math.Min(1200, 8192 - builder.Length)));
+        }
+        return builder.ToString();
+    }
+
+    private static string Trim(string value, int max) => value.Length <= max ? value : value[..Math.Max(0, max)];
 
     private string HistoryPath()
     {

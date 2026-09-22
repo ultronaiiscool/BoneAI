@@ -9,8 +9,10 @@ public sealed class ToolRegistry
 {
     private readonly Dictionary<string, Func<ToolCall, ToolResult>> _handlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _descriptions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _searchText = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ActionRecord> _actions = new();
     private readonly MainThreadDispatcher _dispatcher;
+    private string? _catalogJson;
     public event Action<string>? ActionChanged;
     public int Count => _handlers.Count;
 
@@ -20,6 +22,8 @@ public sealed class ToolRegistry
     {
         _handlers[name] = handler;
         _descriptions[name] = description;
+        _searchText[name] = (name + " " + description).ToLowerInvariant();
+        _catalogJson = null;
     }
 
     public async Task<ToolResult> ExecuteAsync(ToolCall call, CancellationToken cancellationToken)
@@ -61,18 +65,17 @@ public sealed class ToolRegistry
 
     public Task<T> OnGameThreadAsync<T>(Func<T> action) => _dispatcher.InvokeAsync(action);
 
-    public string BuildCatalogJson() => JsonConvert.SerializeObject(_descriptions.Select(x => new { name = x.Key, description = x.Value }), Formatting.None);
+    public string BuildCatalogJson() => _catalogJson ??= JsonConvert.SerializeObject(_descriptions.Select(x => new { name = x.Key, description = x.Value }), Formatting.None);
 
     public string[] SelectForPrompt(string prompt, int limit)
     {
         var words = new HashSet<string>((prompt ?? string.Empty).ToLowerInvariant().Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ':', ';', '/', '_', '-' }, StringSplitOptions.RemoveEmptyEntries));
-        var mandatory = new[] { "tools.search", "tools.list_categories", "player.get_state", "world.look_at_target", "world.find_nearest", "fusion.get_session" };
+        var mandatory = new HashSet<string>(new[] { "tools.search", "tools.list_categories", "player.get_state", "world.look_at_target", "world.find_nearest", "fusion.get_session" }, StringComparer.OrdinalIgnoreCase);
         return _descriptions
             .Select(x => new
             {
                 x.Key,
-                Score = mandatory.Contains(x.Key, StringComparer.OrdinalIgnoreCase) ? 10000 :
-                    words.Sum(word => (x.Key + " " + x.Value).Contains(word, StringComparison.OrdinalIgnoreCase) ? Math.Min(word.Length, 12) : 0)
+                Score = mandatory.Contains(x.Key) ? 10000 : ScoreWords(_searchText[x.Key], words)
             })
             .OrderByDescending(x => x.Score).ThenBy(x => x.Key)
             .Take(Math.Clamp(limit, 8, _descriptions.Count))
@@ -87,13 +90,20 @@ public sealed class ToolRegistry
             var limit = Math.Clamp(call.Arguments["limit"]?.Value<int>() ?? 30, 1, 100);
             var words = query.ToLowerInvariant().Split(new[] { ' ', '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
             var found = _descriptions.Where(x => x.Key != "tools.search")
-                .Select(x => new { name = x.Key, description = x.Value, score = words.Sum(w => (x.Key + " " + x.Value).Contains(w, StringComparison.OrdinalIgnoreCase) ? w.Length : 0) })
+                .Select(x => new { name = x.Key, description = x.Value, score = ScoreWords(_searchText[x.Key], words) })
                 .OrderByDescending(x => x.score).ThenBy(x => x.name).Take(limit).ToArray();
             return ToolResult.Success(call, new { totalTools = Count, matches = found });
         });
         Register("tools.list_categories", "List BoneAI tool namespaces and counts.", call => ToolResult.Success(call,
             _descriptions.Keys.GroupBy(x => x.Split('.')[0]).OrderBy(x => x.Key).Select(x => new { category = x.Key, count = x.Count() }).ToArray()));
         Register("tools.get_recent_actions", "Get recent authoritative action states and failures.", call => ToolResult.Success(call, RecentActions));
+    }
+
+    private static int ScoreWords(string haystack, IEnumerable<string> words)
+    {
+        var score = 0;
+        foreach (var word in words) if (haystack.Contains(word, StringComparison.Ordinal)) score += Math.Min(word.Length, 12);
+        return score;
     }
 
     public JArray BuildOpenAiTools(IEnumerable<string>? selectedNames = null)
