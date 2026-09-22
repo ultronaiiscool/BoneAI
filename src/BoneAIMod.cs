@@ -26,7 +26,7 @@ public sealed class BoneAIMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.6.0 Compatibility Extended on " + PlatformInfo.DisplayName);
+        AgentLog.Info("Starting BoneAI 2.6.1 Quest Standalone Fix on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();

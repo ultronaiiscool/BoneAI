@@ -4,7 +4,7 @@ using System.Net.Http;
 
 namespace BoneAI.Infrastructure;
 
-/// <summary>Starts the official Codex App Server directly on PC. Quest connects to a remote host.</summary>
+/// <summary>Starts the optional official Codex App Server directly on PCVR.</summary>
 public sealed class CodexHostManager : IDisposable
 {
     private readonly CancellationTokenSource _lifetime = new();
@@ -17,7 +17,7 @@ public sealed class CodexHostManager : IDisposable
     {
         if (PlatformInfo.IsAndroid)
         {
-            Status = "Quest uses a remote Codex App Server";
+            Status = "Codex account mode is PCVR-only; use a direct API provider on Quest";
             AgentLog.Info(Status);
             return false;
         }

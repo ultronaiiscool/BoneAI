@@ -62,8 +62,8 @@ public sealed class VoiceAssistant : IDisposable
     {
         try
         {
-            var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
-            if (string.IsNullOrWhiteSpace(key)) { Status = "Voice needs OPENAI_API_KEY"; _nextStartAttempt = Time.unscaledTime + 2f; return; }
+            var key = RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+            if (string.IsNullOrWhiteSpace(key)) { Status = "Voice needs an OpenAI API key"; _nextStartAttempt = Time.unscaledTime + 2f; return; }
             _clip = Microphone.Start(Device(), false, Math.Clamp(_config.VoiceMaxSeconds.Value, 3, 30), Rate);
             _pollSamples = new Il2CppStructArray<float>(4096 * Math.Max(1, _clip.channels));
             _lastPosition = 0; _silentFor = 0; _heardSpeech = false; _lastPoll = Time.unscaledTime;
@@ -94,7 +94,7 @@ public sealed class VoiceAssistant : IDisposable
             var audio = new ByteArrayContent(wav); audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
             form.Add(audio, "file", "boneai-voice.wav"); form.Add(new StringContent("gpt-4o-transcribe"), "model");
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/transcriptions") { Content = form };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
             using var response = await _http.SendAsync(request).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Transcription failed: " + body);
@@ -127,7 +127,7 @@ public sealed class VoiceAssistant : IDisposable
         {
             var body = new JObject { ["model"] = "gpt-4o-mini-tts", ["voice"] = "coral", ["input"] = Trim(text, 1800), ["response_format"] = "wav" };
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
             request.Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
             using var response = await _http.SendAsync(request).ConfigureAwait(false);
             var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);

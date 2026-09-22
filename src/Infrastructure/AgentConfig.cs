@@ -50,8 +50,8 @@ public sealed class AgentConfig
         ConversationThreadId = category.CreateEntry("CodexThreadId", string.Empty);
         AutoStartCodexHost = category.CreateEntry("AutoStartCodexHost", true);
         AllowInsecureRemoteCodex = category.CreateEntry("AllowInsecureRemoteCodex", false);
-        Provider = category.CreateEntry("Provider", "Codex");
-        ProviderModel = category.CreateEntry("ProviderModel", string.Empty);
+        Provider = category.CreateEntry("Provider", PlatformInfo.IsAndroid ? "OpenAI" : "Codex");
+        ProviderModel = category.CreateEntry("ProviderModel", PlatformInfo.IsAndroid ? "gpt-5.3-codex" : string.Empty);
         ProviderBaseUrl = category.CreateEntry("ProviderBaseUrl", string.Empty);
         ProviderConversationId = category.CreateEntry("ProviderConversationId", string.Empty);
         VoiceBetaEnabled = category.CreateEntry("VoiceBetaEnabled", false);

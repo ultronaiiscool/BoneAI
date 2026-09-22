@@ -124,6 +124,21 @@ public sealed class ToolRegistry
         return tools;
     }
 
+    public JArray BuildResponsesTools(IEnumerable<string>? selectedNames = null)
+    {
+        var tools = new JArray();
+        var selected = selectedNames == null ? null : new HashSet<string>(selectedNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _descriptions.Where(x => selected == null || selected.Contains(x.Key)).OrderBy(x => x.Key))
+            tools.Add(new JObject
+            {
+                ["type"] = "function",
+                ["name"] = ToExternalName(entry.Key),
+                ["description"] = entry.Value,
+                ["parameters"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+            });
+        return tools;
+    }
+
     public JArray BuildAnthropicTools(IEnumerable<string>? selectedNames = null)
     {
         var tools = new JArray();

@@ -28,8 +28,8 @@ public sealed class ApiProviderClient : IAgentClient
     {
         var provider = _config.Provider.Value;
         var keyName = ProviderCatalog.ApiKeyEnvironmentVariable(provider);
-        if (!ProviderCatalog.IsLocal(provider) && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(keyName)))
-            throw new InvalidOperationException($"Set {keyName} in Windows, then restart BONELAB.");
+        if (!ProviderCatalog.IsLocal(provider) && string.IsNullOrWhiteSpace(GetApiKey(provider)))
+            throw new InvalidOperationException($"Enter the {provider} API key in BoneAI > AI Provider, or set {keyName} before starting BONELAB.");
         if (string.IsNullOrWhiteSpace(_config.ProviderModel.Value))
             throw new InvalidOperationException("Select a model in BoneMenu or BoneAI.cfg.");
         Connected = true;
@@ -59,7 +59,64 @@ public sealed class ApiProviderClient : IAgentClient
         _request.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         return ProviderCatalog.IsAnthropic(_config.Provider.Value)
             ? await RunAnthropicAsync(prompt, _request.Token).ConfigureAwait(false)
+            : ProviderCatalog.IsOpenAi(_config.Provider.Value)
+                ? await RunOpenAiResponsesAsync(prompt, _request.Token).ConfigureAwait(false)
             : await RunOpenAiCompatibleAsync(prompt, _request.Token).ConfigureAwait(false);
+    }
+
+    private async Task<string> RunOpenAiResponsesAsync(string prompt, CancellationToken cancellationToken)
+    {
+        _history.Add(new JObject { ["role"] = "user", ["content"] = prompt });
+        PersistHistory();
+        for (var round = 0; round < 12; round++)
+        {
+            var selectedTools = _tools.SelectForPrompt(BuildSelectionContext(prompt), ProviderCatalog.ToolLimit(_config.Provider.Value));
+            var body = new JObject
+            {
+                ["model"] = _config.ProviderModel.Value,
+                ["instructions"] = SystemInstructions,
+                ["input"] = _history.DeepClone(),
+                ["tools"] = _tools.BuildResponsesTools(selectedTools),
+                ["tool_choice"] = "auto",
+                ["parallel_tool_calls"] = false,
+                ["store"] = false
+            };
+            var response = await PostAsync(ProviderCatalog.Endpoint(_config), body, false, cancellationToken).ConfigureAwait(false);
+            var output = response["output"] as JArray ?? throw ApiError("OpenAI returned no response output.", response);
+            foreach (var item in output) _history.Add(item.DeepClone());
+
+            var calls = output.OfType<JObject>().Where(x => x["type"]?.Value<string>() == "function_call").ToArray();
+            if (calls.Length == 0)
+            {
+                var text = response["output_text"]?.Value<string>()
+                    ?? string.Concat(output.OfType<JObject>()
+                        .Where(x => x["type"]?.Value<string>() == "message")
+                        .SelectMany(x => (x["content"] as JArray ?? new JArray()).OfType<JObject>())
+                        .Where(x => x["type"]?.Value<string>() == "output_text")
+                        .Select(x => x["text"]?.Value<string>()));
+                PersistHistory();
+                DeltaReceived?.Invoke(text);
+                return text;
+            }
+
+            foreach (var call in calls)
+            {
+                var callId = call["call_id"]?.Value<string>() ?? call["id"]?.Value<string>() ?? Guid.NewGuid().ToString("N");
+                var name = ToolRegistry.FromExternalName(call["name"]?.Value<string>() ?? string.Empty);
+                JObject arguments;
+                try { arguments = JObject.Parse(call["arguments"]?.Value<string>() ?? "{}"); }
+                catch (JsonException) { arguments = new JObject(); }
+                var result = await _tools.ExecuteAsync(new ToolCall { Id = callId, Name = name, Arguments = arguments }, cancellationToken).ConfigureAwait(false);
+                _history.Add(new JObject
+                {
+                    ["type"] = "function_call_output",
+                    ["call_id"] = callId,
+                    ["output"] = JsonConvert.SerializeObject(result)
+                });
+            }
+            PersistHistory();
+        }
+        return "Stopped after the maximum of 12 action rounds.";
     }
 
     private async Task<string> RunOpenAiCompatibleAsync(string prompt, CancellationToken cancellationToken)
@@ -151,14 +208,14 @@ public sealed class ApiProviderClient : IAgentClient
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json");
-        var key = Environment.GetEnvironmentVariable(ProviderCatalog.ApiKeyEnvironmentVariable(_config.Provider.Value));
+        var key = GetApiKey(_config.Provider.Value);
         if (anthropic)
         {
             request.Headers.Add("x-api-key", key);
             request.Headers.Add("anthropic-version", "2023-06-01");
         }
         else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Headers.UserAgent.ParseAdd("BoneAI/2.6.0");
+        request.Headers.UserAgent.ParseAdd("BoneAI/2.6.1");
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         JObject json;
@@ -167,6 +224,10 @@ public sealed class ApiProviderClient : IAgentClient
         if (!response.IsSuccessStatusCode) throw ApiError($"Provider HTTP {(int)response.StatusCode}", json);
         return json;
     }
+
+    private static string? GetApiKey(string provider)
+        => RuntimeSecrets.GetProviderApiKey(provider)
+           ?? Environment.GetEnvironmentVariable(ProviderCatalog.ApiKeyEnvironmentVariable(provider));
 
     private static Exception ApiError(string message, JObject payload)
         => new InvalidOperationException(message + ": " + (payload.SelectToken("error.message")?.Value<string>() ?? payload["error"]?.ToString(Formatting.None) ?? "invalid response"));
@@ -206,8 +267,9 @@ public sealed class ApiProviderClient : IAgentClient
 
 public static class ProviderCatalog
 {
-    public static readonly string[] Names = { "Codex", "Claude", "Grok", "DeepSeek", "OpenRouter", "Ollama", "Custom" };
+    public static readonly string[] Names = { "Codex", "OpenAI", "Claude", "Grok", "DeepSeek", "OpenRouter", "Ollama", "Custom" };
     public static bool IsAnthropic(string provider) => provider.Equals("Claude", StringComparison.OrdinalIgnoreCase);
+    public static bool IsOpenAi(string provider) => provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase);
     public static bool IsLocal(string provider) => provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase);
     public static string ApiKeyEnvironmentVariable(string provider) => provider.ToLowerInvariant() switch
     {
@@ -216,6 +278,7 @@ public static class ProviderCatalog
     };
     public static string DefaultModel(string provider) => provider.ToLowerInvariant() switch
     {
+        "openai" => "gpt-5.3-codex",
         "claude" => "claude-sonnet-4-5", "grok" => "grok-4.6", "deepseek" => "deepseek-v4-flash",
         "openrouter" => "openrouter/auto", "ollama" => "qwen3", _ => string.Empty
     };
@@ -230,10 +293,11 @@ public static class ProviderCatalog
         var root = config.ProviderBaseUrl.Value.TrimEnd('/');
         if (string.IsNullOrWhiteSpace(root)) root = config.Provider.Value.ToLowerInvariant() switch
         {
+            "openai" => "https://api.openai.com/v1",
             "claude" => "https://api.anthropic.com/v1", "grok" => "https://api.x.ai/v1",
             "deepseek" => "https://api.deepseek.com", "openrouter" => "https://openrouter.ai/api/v1",
             "ollama" => "http://127.0.0.1:11434/v1", _ => throw new InvalidOperationException("Set ProviderBaseUrl for the custom provider.")
         };
-        return root + (IsAnthropic(config.Provider.Value) ? "/messages" : "/chat/completions");
+        return root + (IsAnthropic(config.Provider.Value) ? "/messages" : IsOpenAi(config.Provider.Value) ? "/responses" : "/chat/completions");
     }
 }

@@ -8,7 +8,7 @@
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">AnyCPU</PlatformTarget>
     <AssemblyName>BoneAI</AssemblyName>
     <RootNamespace>BoneAI</RootNamespace>
-    <Version>2.6.0</Version>
+    <Version>2.6.1</Version>
     <BONELAB_DIR Condition="'$(BONELAB_DIR)' == ''">$(BONELAB_DIR_ENV)</BONELAB_DIR>
   </PropertyGroup>
 

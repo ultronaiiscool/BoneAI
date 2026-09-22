@@ -21,6 +21,8 @@ public sealed class AgentMenu
     private StringElement? _voiceStatus;
     private StringElement? _transcript;
     private StringElement? _loginCode;
+    private StringElement? _providerKey;
+    private bool _clearingProviderKey;
     private GameObject? _nativeButton;
     private float _nextRefresh;
     private int _conversationCount = -1;
@@ -52,13 +54,16 @@ public sealed class AgentMenu
         voice.CreateFunction("Listen Once", Color.green, _mod.Voice.ListenOnce);
         _voiceStatus = voice.CreateString("Voice Status", Color.gray, "Voice beta off", _ => { });
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
-        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Set OPENAI_API_KEY in Windows and restart BONELAB. Voice is experimental and uses OpenAI audio APIs."));
+        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Enter an OpenAI API key under AI Provider. The key stays only in memory for this BONELAB session."));
 
         var provider = _root.CreatePage("AI Provider", new Color(0.55f, 0.55f, 1f), 9);
+        provider.CreateFunction("Quest Standalone OpenAI", Color.green, SelectQuestStandaloneOpenAi);
         provider.CreateFunction("Change Provider", Color.cyan, CycleProvider);
         provider.CreateString("Provider", Color.white, _mod.Config.Provider.Value, v => _mod.Config.Provider.Value = v);
         provider.CreateString("Model", Color.white, _mod.Config.ProviderModel.Value, v => _mod.Config.ProviderModel.Value = v);
         provider.CreateString("Custom Base URL", Color.white, _mod.Config.ProviderBaseUrl.Value, v => _mod.Config.ProviderBaseUrl.Value = v);
+        _providerKey = provider.CreateString("API Key (session only)", Color.white, string.Empty, SetProviderApiKey);
+        provider.CreateFunction("Clear Current API Key", Color.yellow, ClearProviderApiKey);
         provider.CreateFunction("Reconnect", Color.green, () => _ = _mod.Conversation.ConnectAsync());
         provider.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
 
@@ -71,7 +76,7 @@ public sealed class AgentMenu
         codex.CreateFunction("Reconnect", Color.white, () => _ = _mod.Conversation.ConnectAsync());
         codex.CreateFunction("Sign Out", Color.red, () => _ = _mod.Conversation.LogoutCodexAsync());
         Bind(codex, "Allow Insecure Private LAN", _mod.Config.AllowInsecureRemoteCodex);
-        codex.CreateFunction("Quest Connection Help", Color.yellow, () => Notify("Quest Codex", "Quest cannot run Codex App Server itself. Enter the secure wss:// address and connection token for Codex running on your PC, then choose Sign In With Codex."));
+        codex.CreateFunction("Quest Standalone Help", Color.yellow, () => Notify("Quest Standalone", "For no-PC Quest use, choose OpenAI or another cloud provider under AI Provider and enter its API key in-game. Codex account sign-in requires the official App Server and is PCVR-only."));
 
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
         permissions.CreateFunction("Enable All Game Controls", Color.green, EnableAll);
@@ -155,6 +160,23 @@ public sealed class AgentMenu
         Infrastructure.RuntimeSecrets.CodexTransportToken = value;
         Notify("BoneAI", string.IsNullOrWhiteSpace(value) ? "Secure connection token cleared." : "Secure connection token set for this game session.");
     }
+    private void SetProviderApiKey(string value)
+    {
+        if (_clearingProviderKey || string.IsNullOrWhiteSpace(value)) return;
+        var provider = _mod.Config.Provider.Value;
+        Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, value);
+        _clearingProviderKey = true;
+        if (_providerKey != null) _providerKey.Value = string.Empty;
+        _clearingProviderKey = false;
+        Notify("BoneAI", provider + " API key set for this game session. It was not written to disk or logs.");
+        _ = _mod.Conversation.ConnectAsync();
+    }
+    private void ClearProviderApiKey()
+    {
+        var provider = _mod.Config.Provider.Value;
+        Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, null);
+        Notify("BoneAI", provider + " API key cleared.");
+    }
     private async Task SignInWithCodexAsync()
     {
         try
@@ -181,6 +203,13 @@ public sealed class AgentMenu
         Application.OpenURL(_mod.Conversation.DeviceLoginUrl);
     }
     private void EnableAll() { _mod.Config.Enabled.Value = _mod.Config.AllowActions.Value = _mod.Config.AllowPlayerModification.Value = _mod.Config.AllowSpawning.Value = _mod.Config.AllowCombat.Value = _mod.Config.FusionSynchronization.Value = true; Notify("BoneAI", "All game controls enabled."); }
+    private void SelectQuestStandaloneOpenAi()
+    {
+        _mod.Config.Provider.Value = "OpenAI";
+        _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel("OpenAI");
+        _mod.Config.ProviderBaseUrl.Value = string.Empty;
+        Notify("Quest Standalone", "OpenAI direct mode selected. Enter your OpenAI API key below; no PC or bridge is used.");
+    }
     private void CycleProvider() { var names = AI.ProviderCatalog.Names; var at = Array.FindIndex(names, x => x.Equals(_mod.Config.Provider.Value, StringComparison.OrdinalIgnoreCase)); var next = names[(at + 1 + names.Length) % names.Length]; _mod.Config.Provider.Value = next; _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel(next); _mod.Config.ProviderBaseUrl.Value = string.Empty; Notify("BoneAI provider", next); _ = _mod.Conversation.ConnectAsync(); }
     private static void Notify(string title, string message) => Notifier.Send(new Notification { Title = title, Message = message, ShowTitleOnPopup = true, PopupLength = 7, Type = NotificationType.Information });
     private static void Bind(Page page, string name, MelonLoader.MelonPreferences_Entry<bool> entry, Action<bool>? extra = null) => page.CreateBool(name, Color.white, entry.Value, v => { entry.Value = v; extra?.Invoke(v); });
