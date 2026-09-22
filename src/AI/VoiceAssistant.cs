@@ -95,8 +95,8 @@ public sealed class VoiceAssistant : IDisposable
             form.Add(audio, "file", "boneai-voice.wav"); form.Add(new StringContent("gpt-4o-transcribe"), "model");
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/transcriptions") { Content = form };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
-            using var response = await _http.SendAsync(request).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            var body = Encoding.UTF8.GetString(await ReadLimitedAsync(response.Content, 1024 * 1024).ConfigureAwait(false));
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Transcription failed: " + body);
             var text = JObject.Parse(body)["text"]?.Value<string>()?.Trim() ?? string.Empty;
             LastTranscript = text;
@@ -129,8 +129,8 @@ public sealed class VoiceAssistant : IDisposable
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
             request.Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
-            using var response = await _http.SendAsync(request).ConfigureAwait(false);
-            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            var bytes = await ReadLimitedAsync(response.Content, 16 * 1024 * 1024).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Speech request failed.");
             await _dispatcher.InvokeAsync(() => { PlayWav(bytes); return true; });
         }
@@ -161,6 +161,14 @@ public sealed class VoiceAssistant : IDisposable
         writer.Write(Encoding.ASCII.GetBytes("RIFF")); writer.Write(36 + size); writer.Write(Encoding.ASCII.GetBytes("WAVEfmt ")); writer.Write(16); writer.Write((short)1); writer.Write((short)channels); writer.Write(Rate); writer.Write(Rate * channels * 2); writer.Write((short)(channels * 2)); writer.Write((short)16); writer.Write(Encoding.ASCII.GetBytes("data")); writer.Write(size);
         foreach (var sample in samples) writer.Write((short)(Math.Clamp(sample, -1f, 1f) * short.MaxValue));
         return stream.ToArray();
+    }
+
+    private static async Task<byte[]> ReadLimitedAsync(HttpContent content, int limit)
+    {
+        if (content.Headers.ContentLength is long length && length > limit) throw new InvalidDataException("Voice response exceeded its safety limit.");
+        await using var input = await content.ReadAsStreamAsync().ConfigureAwait(false); using var output = new MemoryStream(); var buffer = new byte[16384];
+        while (true) { var read = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false); if (read == 0) break; if (output.Length + read > limit) throw new InvalidDataException("Voice response exceeded its safety limit."); output.Write(buffer, 0, read); }
+        return output.ToArray();
     }
 
     private string Device() => string.IsNullOrWhiteSpace(_config.VoiceInputDevice.Value) ? null! : _config.VoiceInputDevice.Value;

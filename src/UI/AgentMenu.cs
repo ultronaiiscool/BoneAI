@@ -54,7 +54,7 @@ public sealed class AgentMenu
         voice.CreateFunction("Listen Once", Color.green, _mod.Voice.ListenOnce);
         _voiceStatus = voice.CreateString("Voice Status", Color.gray, "Voice beta off", _ => { });
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
-        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Enter an OpenAI API key under AI Provider. The key stays only in memory for this BONELAB session."));
+        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Enter an OpenAI API key under AI Provider. BoneAI saves it with your device's protected credential storage until you clear it."));
 
         var provider = _root.CreatePage("AI Provider", new Color(0.55f, 0.55f, 1f), 9);
         provider.CreateFunction("Quest Standalone OpenAI", Color.green, SelectQuestStandaloneOpenAi);
@@ -62,20 +62,18 @@ public sealed class AgentMenu
         provider.CreateString("Provider", Color.white, _mod.Config.Provider.Value, v => _mod.Config.Provider.Value = v);
         provider.CreateString("Model", Color.white, _mod.Config.ProviderModel.Value, v => _mod.Config.ProviderModel.Value = v);
         provider.CreateString("Custom Base URL", Color.white, _mod.Config.ProviderBaseUrl.Value, v => _mod.Config.ProviderBaseUrl.Value = v);
-        _providerKey = provider.CreateString("API Key (session only)", Color.white, string.Empty, SetProviderApiKey);
+        _providerKey = provider.CreateString("API Key (saved securely)", Color.white, string.Empty, SetProviderApiKey);
         provider.CreateFunction("Clear Current API Key", Color.yellow, ClearProviderApiKey);
         provider.CreateFunction("Reconnect", Color.green, () => _ = _mod.Conversation.ConnectAsync());
         provider.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
 
         var codex = _root.CreatePage("Codex Sign-In", new Color(0.18f, 0.72f, 1f), 9);
-        codex.CreateString("App Server Address", Color.white, _mod.Config.Endpoint.Value, v => _mod.Config.Endpoint.Value = v.Trim());
-        codex.CreateString("Secure Connection Token", Color.white, string.Empty, SetTransportToken);
         _loginCode = codex.CreateString("One-Time Code", Color.white, "Not started", _ => { });
         codex.CreateFunction("Sign In With Codex", Color.green, () => _ = SignInWithCodexAsync());
         codex.CreateFunction("Open Sign-In Page Again", Color.cyan, OpenLoginPage);
         codex.CreateFunction("Reconnect", Color.white, () => _ = _mod.Conversation.ConnectAsync());
-        codex.CreateFunction("Sign Out", Color.red, () => _ = _mod.Conversation.LogoutCodexAsync());
-        Bind(codex, "Allow Insecure Private LAN", _mod.Config.AllowInsecureRemoteCodex);
+        codex.CreateFunction("Sign Out", Color.red, () => _ = SignOutCodexAsync());
+        codex.CreateFunction("About Saved Login", Color.white, () => Notify("Codex Login", "Codex securely keeps and refreshes your login. It remains signed in after restarts until you choose Sign Out."));
         codex.CreateFunction("Quest Standalone Help", Color.yellow, () => Notify("Quest Standalone", "For no-PC Quest use, choose OpenAI or another cloud provider under AI Provider and enter its API key in-game. Codex account sign-in requires the official App Server and is PCVR-only."));
 
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
@@ -109,7 +107,7 @@ public sealed class AgentMenu
         if (_response != null) _response.Value = Trim(_mod.Conversation.LastResponse, 120);
         if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.Voice.Status, 100);
         if (_transcript != null) _transcript.Value = Trim(_mod.Voice.LastTranscript, 100);
-        if (_loginCode != null) _loginCode.Value = string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginCode) ? (_mod.Conversation.CodexSignedIn ? "Signed in" : "Not signed in") : _mod.Conversation.DeviceLoginCode;
+        if (_loginCode != null) _loginCode.Value = string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginCode) ? (_mod.Conversation.CodexSignedIn ? "Signed in (saved by Codex)" : "Not signed in") : _mod.Conversation.DeviceLoginCode;
         if (_conversationCount != _mod.Conversation.SavedConversationCount) BuildConversations();
     }
 
@@ -155,38 +153,35 @@ public sealed class AgentMenu
 
     private void SendPrompt() { var value = _prompt?.Value ?? string.Empty; if (string.IsNullOrWhiteSpace(value)) return; if (_prompt != null) _prompt.Value = string.Empty; _ = _mod.Conversation.SendAsync(value); }
     private void ShowResponse() => Notify("BoneAI", Trim(_mod.Conversation.LastResponse, 480));
-    private void SetTransportToken(string value)
-    {
-        Infrastructure.RuntimeSecrets.CodexTransportToken = value;
-        Notify("BoneAI", string.IsNullOrWhiteSpace(value) ? "Secure connection token cleared." : "Secure connection token set for this game session.");
-    }
     private void SetProviderApiKey(string value)
     {
         if (_clearingProviderKey || string.IsNullOrWhiteSpace(value)) return;
         var provider = _mod.Config.Provider.Value;
-        Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, value);
+        var persisted = Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, value);
         _clearingProviderKey = true;
         if (_providerKey != null) _providerKey.Value = string.Empty;
         _clearingProviderKey = false;
-        Notify("BoneAI", provider + " API key set for this game session. It was not written to disk or logs.");
+        Notify("BoneAI", persisted ? provider + " API key encrypted and saved on this device." : provider + " API key is active for this session only; protected storage failed: " + Infrastructure.RuntimeSecrets.LastStorageError);
         _ = _mod.Conversation.ConnectAsync();
     }
     private void ClearProviderApiKey()
     {
         var provider = _mod.Config.Provider.Value;
-        Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, null);
-        Notify("BoneAI", provider + " API key cleared.");
+        var cleared = Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, null);
+        Notify("BoneAI", cleared ? provider + " API key cleared from memory and protected storage." : provider + " key cleared from memory, but protected storage reported: " + Infrastructure.RuntimeSecrets.LastStorageError);
     }
     private async Task SignInWithCodexAsync()
     {
         try
         {
+            if (!Infrastructure.PlatformInfo.IsAndroid && !await _mod.EnsureCodexHostAsync().ConfigureAwait(false))
+                throw new InvalidOperationException(_mod.CodexHost.Status);
             var login = await _mod.Conversation.StartCodexDeviceLoginAsync().ConfigureAwait(false);
             await _mod.Dispatcher.InvokeAsync(() =>
             {
                 GUIUtility.systemCopyBuffer = login.UserCode;
                 Notify("Codex Sign-In", "Code " + login.UserCode + " copied. Paste it in the browser, finish signing in, then return to BONELAB.");
-                Application.OpenURL(login.VerificationUrl);
+                Application.OpenURL(ValidateCodexLoginUrl(login.VerificationUrl));
                 return true;
             }).ConfigureAwait(false);
         }
@@ -196,11 +191,31 @@ public sealed class AgentMenu
             await _mod.Dispatcher.InvokeAsync(() => { Notify("Codex Sign-In Failed", ex.GetBaseException().Message); return true; }).ConfigureAwait(false);
         }
     }
+    private async Task SignOutCodexAsync()
+    {
+        try
+        {
+            if (!Infrastructure.PlatformInfo.IsAndroid && !await _mod.EnsureCodexHostAsync().ConfigureAwait(false)) throw new InvalidOperationException(_mod.CodexHost.Status);
+            _mod.Config.Provider.Value = "Codex";
+            await _mod.Conversation.ConnectAsync().ConfigureAwait(false);
+            await _mod.Conversation.LogoutCodexAsync().ConfigureAwait(false);
+            await _mod.Dispatcher.InvokeAsync(() => { Notify("Codex", "Signed out. Codex's saved login was cleared."); return true; }).ConfigureAwait(false);
+        }
+        catch (Exception ex) { Infrastructure.AgentLog.Exception("Codex sign-out", ex); await _mod.Dispatcher.InvokeAsync(() => { Notify("Codex Sign-Out Failed", ex.GetBaseException().Message); return true; }).ConfigureAwait(false); }
+    }
     private void OpenLoginPage()
     {
         if (string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginUrl)) { Notify("Codex Sign-In", "Choose Sign In With Codex first."); return; }
         GUIUtility.systemCopyBuffer = _mod.Conversation.DeviceLoginCode;
-        Application.OpenURL(_mod.Conversation.DeviceLoginUrl);
+        try { Application.OpenURL(ValidateCodexLoginUrl(_mod.Conversation.DeviceLoginUrl)); }
+        catch (Exception ex) { Notify("Codex Sign-In", ex.Message); }
+    }
+    private static string ValidateCodexLoginUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
+            !(uri.Host.Equals("auth.openai.com", StringComparison.OrdinalIgnoreCase) || uri.Host.Equals("chatgpt.com", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Codex returned an untrusted sign-in URL. Sign-in was blocked.");
+        return uri.AbsoluteUri;
     }
     private void EnableAll() { _mod.Config.Enabled.Value = _mod.Config.AllowActions.Value = _mod.Config.AllowPlayerModification.Value = _mod.Config.AllowSpawning.Value = _mod.Config.AllowCombat.Value = _mod.Config.FusionSynchronization.Value = true; Notify("BoneAI", "All game controls enabled."); }
     private void SelectQuestStandaloneOpenAi()

@@ -651,7 +651,7 @@ public sealed class GameToolset
             new{name="BoneAI.Catalogs",loaded=true,usable=true,integration="Built into BoneAI.dll; scans WristHub and installed pallet manifests"}
         });
     }
-    private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=c.Arguments["limit"]?.Value<int>()??40;var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).ToArray();return ToolResult.Success(c,lines);}
+    private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=Math.Clamp(c.Arguments["limit"]?.Value<int>()??40,1,200);var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).Select(Infrastructure.RuntimeSecrets.Redact).ToArray();return ToolResult.Success(c,lines);}
     private ToolResult Notify(ToolCall c){Notifier.Send(new Notification{Title="BoneAI",Message=Str(c,"message"),ShowTitleOnPopup=true,Type=NotificationType.Information,PopupLength=4});return ToolResult.Success(c);}
     private ToolResult PerformanceDiagnostics(ToolCall c) => ToolResult.Success(c, new
     {

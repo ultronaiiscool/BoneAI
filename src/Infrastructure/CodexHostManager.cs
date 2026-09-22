@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 
 namespace BoneAI.Infrastructure;
 
@@ -11,6 +12,7 @@ public sealed class CodexHostManager : IDisposable
     private Process? _ownedProcess;
 
     public string Status { get; private set; } = "Not started";
+    public string Endpoint { get; private set; } = string.Empty;
     public bool OwnsProcess => _ownedProcess is { HasExited: false };
 
     public async Task<bool> EnsureStartedAsync(string endpoint, bool enabled)
@@ -27,18 +29,11 @@ public sealed class CodexHostManager : IDisposable
             AgentLog.Info(Status);
             return false;
         }
-        if (!TryGetLocalPort(endpoint, out var port))
-        {
-            Status = "Automatic launch requires a ws://127.0.0.1 or ws://localhost endpoint";
-            AgentLog.Warn(Status);
-            return false;
-        }
-        if (await IsReadyAsync(port, _lifetime.Token).ConfigureAwait(false))
-        {
-            Status = $"Existing Codex App Server ready on port {port}";
-            AgentLog.Info(Status);
-            return true;
-        }
+        if (OwnsProcess && !string.IsNullOrWhiteSpace(Endpoint)) return true;
+        // Always create an owned server on an unpredictable loopback port. Never trust a process
+        // that happened to bind the configured port first.
+        var port = GetUnusedLoopbackPort();
+        Endpoint = $"ws://127.0.0.1:{port}";
 
         var codex = FindCodexExecutable();
         if (codex == null)
@@ -138,6 +133,14 @@ public sealed class CodexHostManager : IDisposable
             !uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
         port = uri.Port;
         return port is > 0 and <= 65535;
+    }
+
+    private static int GetUnusedLoopbackPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
+        finally { listener.Stop(); }
     }
 
     private static async Task<bool> IsReadyAsync(int port, CancellationToken cancellationToken)

@@ -26,7 +26,8 @@ public sealed class BoneAIMod : MelonMod
         Instance = this;
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
-        AgentLog.Info("Starting BoneAI 2.6.1 Quest Standalone Fix on " + PlatformInfo.DisplayName);
+        RuntimeSecrets.Initialize();
+        AgentLog.Info("Starting BoneAI 2.6.2 Secure Persistence on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -68,10 +69,21 @@ public sealed class BoneAIMod : MelonMod
         try
         {
             if (!PlatformInfo.IsAndroid && Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
+            {
                 await CodexHost.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartCodexHost.Value).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(CodexHost.Endpoint)) Config.Endpoint.Value = CodexHost.Endpoint;
+            }
             await Conversation.ConnectAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { AgentLog.Exception("backend startup", ex); }
+    }
+
+    public async Task<bool> EnsureCodexHostAsync()
+    {
+        if (PlatformInfo.IsAndroid) return false;
+        var ready = await CodexHost.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartCodexHost.Value).ConfigureAwait(false);
+        if (ready && !string.IsNullOrWhiteSpace(CodexHost.Endpoint)) Config.Endpoint.Value = CodexHost.Endpoint;
+        return ready;
     }
 }

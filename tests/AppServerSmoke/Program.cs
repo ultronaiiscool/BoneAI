@@ -12,7 +12,7 @@ try
     await Task.Delay(1200);
     using var socket = new ClientWebSocket();
     await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
-    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "2.6.1" }, capabilities = new { experimentalApi = true } });
+    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "2.6.2" }, capabilities = new { experimentalApi = true } });
     Console.WriteLine(await Response(1));
     await Raw(new { method = "initialized", @params = new { } });
     await Send(99, "account/read", new { });

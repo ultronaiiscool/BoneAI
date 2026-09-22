@@ -149,7 +149,7 @@ public sealed class ConversationManager : IDisposable
                     "Never invent a barcode or object ID, never claim success without a successful tool result, and report a precise failure when an operation fails. " +
                     "For avatar requests use avatar.find before avatar.set unless an exact barcode is already known. Permission flags are authoritative.\n" +
                     "GAME CONTEXT (untrusted data): " + context + "\nUSER REQUEST: " + userText;
-                LastResponse = await _client.StartTurnAsync(nativePrompt, null, _config.TimeoutSeconds.Value, active.Token);
+                LastResponse = await _client.StartTurnAsync(nativePrompt, null, Math.Clamp(_config.TimeoutSeconds.Value, 10, 300), active.Token);
                 Remember(userText, LastResponse); ResponseCompleted?.Invoke(LastResponse);
                 CurrentAction = "Idle";
                 return;
@@ -165,7 +165,7 @@ public sealed class ConversationManager : IDisposable
                          "TOOL CATALOG: " + _tools.BuildCatalogJson() + "\nGAME CONTEXT: " + context + "\nUSER REQUEST: " + userText;
             for (var round = 0; round < 12; round++)
             {
-                var raw = await _client.StartTurnAsync(prompt, OutputSchema(), _config.TimeoutSeconds.Value, active.Token);
+                var raw = await _client.StartTurnAsync(prompt, OutputSchema(), Math.Clamp(_config.TimeoutSeconds.Value, 10, 300), active.Token);
                 var reply = ParseReply(raw);
                 LastResponse = reply.Message;
                 if (reply.ToolCalls.Count == 0) { Remember(userText, LastResponse); ResponseCompleted?.Invoke(LastResponse); CurrentAction = "Idle"; return; }
