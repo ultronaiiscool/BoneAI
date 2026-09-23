@@ -505,12 +505,13 @@ public sealed class GameToolset
     {
         var query=c.Arguments["query"]?.Value<string>()??string.Empty; var limit=Math.Clamp(c.Arguments["limit"]?.Value<int>()??20,1,100);
         var catalog = SpawnCatalog();
-        if (_spawns.IsRefreshing && _spawns.EntryCount == 0) return ToolResult.Pending(c, new { catalogLoading = true }, "Spawn catalog is loading in small batches. Retry shortly.");
         if (catalog.Count == 0 && AssetWarehouse.Instance?.InitialLoaded != true) return ToolResult.Failure(c, "Marrow warehouse is not loaded yet.");
+        if (catalog.Count == 0 && _spawns.IsRefreshing) return ToolResult.Pending(c, new { catalogLoading = true }, "Spawn catalog is loading in small batches. Retry shortly.");
+        if (catalog.Count == 0 && _spawns.EntryCount == 0) return ToolResult.Pending(c, new { catalogLoading = true }, "Spawn catalog will start loading on the next game update. Retry shortly.");
         return ToolResult.Success(c,catalog.OrderBy(x=>Score(x.Title,query)).Take(limit)
             .Select(x=>new{title=x.Title,barcode=x.Barcode,source=x.Source,category=x.Category,loaded=true}).ToArray());
     }
-    private ToolResult RefreshSpawns(ToolCall c){var previous=_spawns.Refresh();if(!_spawns.IsRefreshing)return ToolResult.Failure(c,"Marrow warehouse is not loaded; try again after the level finishes loading.");return ToolResult.Pending(c,new{provider="Marrow warehouse",previousCount=previous,refreshing=true},"Spawn catalog refresh started in per-frame batches. Call spawn.list shortly.");}
+    private ToolResult RefreshSpawns(ToolCall c){if(AssetWarehouse.Instance?.InitialLoaded!=true)return ToolResult.Failure(c,"Marrow warehouse is not loaded; try again after the level finishes loading.");var previous=_spawns.Refresh();return ToolResult.Pending(c,new{provider="Marrow warehouse",previousCount=previous,refreshing=true},"Spawn catalog refresh queued for per-frame batches. Call spawn.list shortly.");}
     private ToolResult SpawnStatus(ToolCall c)
     {
         var actionId=Str(c,"actionId");

@@ -37,7 +37,6 @@ public sealed class SpawnController
 
     public IReadOnlyList<SpawnCatalogEntry> GetEntries()
     {
-        if (_pendingCrates == null && Time.unscaledTime >= _expiresAt) StartCatalogScan();
         return _entries ?? Array.Empty<SpawnCatalogEntry>();
     }
 
@@ -97,13 +96,12 @@ public sealed class SpawnController
     public int Refresh()
     {
         _expiresAt = 0;
-        if (_pendingCrates == null) StartCatalogScan();
         return EntryCount;
     }
 
     public Attempt Spawn(string actionId, string query, Vector3 position, Quaternion rotation)
     {
-        if (GetEntries().Count == 0) throw new InvalidOperationException(IsRefreshing ? "The spawn catalog is still loading; retry after it finishes." : "The Marrow spawnable warehouse is not loaded yet.");
+        if (GetEntries().Count == 0) throw new InvalidOperationException(AssetWarehouse.Instance?.InitialLoaded == true ? "The spawn catalog is still loading; retry after it finishes." : "The Marrow spawnable warehouse is not loaded yet.");
         var entry = SpawnCatalogMatcher.Resolve(GetEntries(), query);
         if (!Finite(position.x) || !Finite(position.y) || !Finite(position.z))
             throw new ArgumentException("Spawn position must contain finite coordinates.");
