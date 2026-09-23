@@ -215,7 +215,7 @@ public sealed class ApiProviderClient : IAgentClient
             var key = GetApiKey(_config.Provider.Value);
             if (anthropic) { request.Headers.Add("x-api-key", key); request.Headers.Add("anthropic-version", "2023-06-01"); }
             else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-            request.Headers.UserAgent.ParseAdd("BoneAI/3.2.0");
+            request.Headers.UserAgent.ParseAdd("BoneAI/3.3.0");
             if (ProviderCatalog.IsOpenRouter(_config.Provider.Value))
             {
                 request.Headers.TryAddWithoutValidation("HTTP-Referer", "https://github.com/ultronaiiscool/BoneAI");

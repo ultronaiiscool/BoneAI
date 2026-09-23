@@ -26,6 +26,9 @@ public sealed class AgentMenu
     private StringElement? _transcript;
     private StringElement? _loginCode;
     private StringElement? _providerKey;
+    private StringElement? _groqVoiceKey;
+    private StringElement? _cloudflareVoiceKey;
+    private bool _clearingVoiceKeys;
     private StringElement? _runtimeStatus;
     private StringElement? _spawnQuery;
     private StringElement? _spawnStatus;
@@ -75,10 +78,15 @@ public sealed class AgentMenu
         voice.CreateFunction("Listen Once", Color.green, _mod.Voice.ListenOnce);
         voice.CreateFunction("Open Free Browser Voice", Color.cyan, OpenBrowserVoice);
         voice.CreateFunction("Open On-Device Voice", Color.green, OpenLocalBrowserVoice);
+        _groqVoiceKey = voice.CreateString("Groq free-tier STT key", Color.white, string.Empty, v => SetVoiceKey("Groq", v, _groqVoiceKey));
+        _cloudflareVoiceKey = voice.CreateString("Cloudflare STT token", Color.white, string.Empty, v => SetVoiceKey("Cloudflare", v, _cloudflareVoiceKey));
+        voice.CreateString("Cloudflare Account ID", Color.white, _mod.Config.CloudflareAccountId.Value, v => _mod.Config.CloudflareAccountId.Value = v.Trim());
+        voice.CreateFunction("Clear Groq STT key", Color.yellow, () => ClearVoiceKey("Groq"));
+        voice.CreateFunction("Clear Cloudflare STT token", Color.yellow, () => ClearVoiceKey("Cloudflare"));
         voice.CreateFunction("Stop Browser Voice", Color.yellow, _mod.BrowserVoice.Stop);
         _voiceStatus = voice.CreateString("Voice Status", Color.gray, "Voice beta off", _ => { });
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
-        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Browser Voice tries on-device speech first where supported, then the browser service. On-device may need a model download. Typed commands always work. In-game microphone voice requires an OpenAI key."));
+        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Automatic: browser on-device, browser service, Groq, Cloudflare. Free web tiers need your own keys and have limits. Keys stay in the game. Type a command if speech fails."));
 
         var provider = _root.CreatePage("AI Provider", cyan, 9);
         provider.CreateFunction("Codex account sign-in", mint, SelectCodex);
@@ -291,6 +299,20 @@ public sealed class AgentMenu
         var provider = _mod.Config.Provider.Value;
         var cleared = Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, null);
         Notify("BoneAI", cleared ? provider + " API key cleared from memory and protected storage." : provider + " key cleared from memory, but protected storage reported: " + Infrastructure.RuntimeSecrets.LastStorageError);
+    }
+    private void SetVoiceKey(string provider, string value, StringElement? field)
+    {
+        if (_clearingVoiceKeys || string.IsNullOrWhiteSpace(value)) return;
+        var persisted = Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, value);
+        _clearingVoiceKeys = true;
+        if (field != null) field.Value = string.Empty;
+        _clearingVoiceKeys = false;
+        Notify("Voice Beta", persisted ? provider + " transcription key saved securely." : provider + " key is session-only; protected storage failed.");
+    }
+    private void ClearVoiceKey(string provider)
+    {
+        var cleared = Infrastructure.RuntimeSecrets.SetProviderApiKey(provider, null);
+        Notify("Voice Beta", cleared ? provider + " transcription key cleared." : provider + " key cleared from memory; protected storage removal failed.");
     }
     private async Task SignInWithCodexAsync()
     {

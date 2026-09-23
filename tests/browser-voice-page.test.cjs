@@ -45,10 +45,15 @@ vm.runInContext(source, context);
   assert.equal(element('start').textContent, 'Stop listening');
   const recognition = SpeechRecognition.last;
   recognition.onerror({ error: 'network' });
-  recognition.onend();
+  assert.equal(element('start').textContent, 'Stop listening', 'local failure did not keep automatic fallback active');
+  assert.equal(timers.length, 1, 'local failure did not schedule browser fallback');
+  timers.shift()();
+  assert.notEqual(SpeechRecognition.last, recognition, 'browser fallback did not start');
+  assert.equal(SpeechRecognition.last.processLocally, false, 'fallback still used local mode');
+  SpeechRecognition.last.onerror({ error: 'network' });
   assert.equal(element('start').textContent, 'Start listening', 'fatal error did not stop UI');
   assert.match(element('status').textContent, /browser speech service could not connect/i);
-  assert.equal(timers.length, 0, 'network error triggered an automatic retry');
+  assert.equal(timers.length, 0, 'network error triggered an automatic retry without another provider');
 
   element('mode').value = 'browser';
   element('mode').listeners.change();
@@ -57,8 +62,8 @@ vm.runInContext(source, context);
   element('manual').value = 'spawn a Ford';
   element('manual-form').listeners.submit({ preventDefault() {} });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(requests.length, 1, 'manual fallback did not submit');
-  assert.equal(JSON.parse(requests[0].options.body).text, 'spawn a Ford');
+  assert.equal(requests.filter(item => item.url.startsWith('/prompt?')).length, 1, 'manual fallback did not submit');
+  assert.equal(JSON.parse(requests.find(item => item.url.startsWith('/prompt?')).options.body).text, 'spawn a Ford');
   assert.equal(element('manual').value, '', 'manual field was not cleared');
 
   const fallbackElements = new Map();
@@ -83,5 +88,39 @@ vm.runInContext(source, context);
   assert.equal(fallbackElement('start').textContent, 'Stop listening');
   LocalUnavailable.last.onerror({ error: 'network' });
   assert.equal(fallbackElement('start').textContent, 'Start listening');
+
+  let microphoneRequests = 0;
+  const cloudElements = new Map();
+  function cloudElement(id) {
+    if (!cloudElements.has(id)) cloudElements.set(id, {
+      value: id === 'mode' ? 'auto' : '', textContent: '', disabled: false,
+      listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; },
+      querySelector() { return { disabled: false }; }
+    });
+    return cloudElements.get(id);
+  }
+  class FakeAudioContext {
+    sampleRate = 48000;
+    destination = {};
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createScriptProcessor() { return { connect() {}, disconnect() {} }; }
+    close() {}
+  }
+  const cloudContext = vm.createContext({
+    window: { SpeechRecognition: LocalUnavailable, AudioContext: FakeAudioContext },
+    navigator: { mediaDevices: { async getUserMedia() { microphoneRequests++; return { getTracks: () => [{ stop() {} }] }; } } },
+    document: { getElementById: cloudElement },
+    setTimeout, clearTimeout, Date, console,
+    fetch: async url => url.startsWith('/capabilities?')
+      ? { ok: true, async json() { return { groq: true, cloudflare: true }; } }
+      : { status: 202 }
+  });
+  vm.runInContext(source, cloudContext);
+  await new Promise(resolve => setImmediate(resolve));
+  await cloudElement('start').listeners.click();
+  LocalUnavailable.last.onerror({ error: 'network' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(microphoneRequests, 1, 'network error did not start configured web fallback');
+  assert.match(cloudElement('status').textContent, /groq.*cloudflare/i, 'web fallback order is not visible');
   console.log('Browser voice page behavior tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

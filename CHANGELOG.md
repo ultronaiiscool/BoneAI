@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.3.0 — More voice paths
+
+- Browser Voice Automatic mode now tries on-device recognition, the browser speech service, Groq Whisper, then Cloudflare Whisper where configured. Typed commands remain available after all voice paths fail.
+- Added separate Groq and Cloudflare STT credentials in the Voice menu, stored through BoneAI's protected key store. Cloudflare also requires an Account ID. Credentials are not exposed to the browser page.
+- Added bounded WAV microphone capture in the browser, server-side transcription over documented HTTPS endpoints, status/error reporting, and tests for the fallback sequence.
+- Groq and Cloudflare offer limited free tiers, not unlimited or anonymous usage. The web fallbacks need user accounts/keys and send recorded audio to those providers. No autoupdater; the Quest native App Server library is unchanged.
+
 ## 3.2.0 — Model choice, voice fallback, and smoother game actions
 
 - Added an in-game Codex model browser backed by the App Server's paginated `model/list` response, including optional older/hidden entries. A selected model and its supported default effort are saved; an explicit Codex-default option clears the override.

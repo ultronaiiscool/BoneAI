@@ -27,6 +27,8 @@
       <option value="auto">Automatic (on-device first, then browser)</option>
       <option value="local">On-device (no speech-service connection)</option>
       <option value="browser">Browser speech service (may need internet)</option>
+      <option value="groq">Groq Whisper (free tier; own key)</option>
+      <option value="cloudflare">Cloudflare Whisper (free tier; own key)</option>
     </select>
     <p id="mode-help" class="hint"></p>
     <label for="language">Language</label>
@@ -52,7 +54,7 @@
     </form>
     <p id="send-status" role="status" aria-live="polite"></p>
   </div>
-  <p class="hint">Keep this page open for voice commands. Browser voice support varies by browser and device. On-device mode may require a one-time browser model download; it is not available everywhere. This page runs only on your device and sends commands to BoneAI's loopback bridge.</p>
+  <p class="hint">Automatic: on-device → browser service → Groq → Cloudflare when configured. The last two send microphone audio to their services and require your own free-tier credentials in BoneAI's Voice menu. Free tiers have limits. Keys stay in the game, never in this page. Typed commands always work.</p>
   <script>
   'use strict';
   const TOKEN = __TOKEN_JSON__;
@@ -70,36 +72,37 @@
   const localSupported = !!(SR && 'processLocally' in SR.prototype &&
     typeof SR.available === 'function' && typeof SR.install === 'function');
   let active = false, preparing = false, recognition = null, restartTimer = null, armedUntil = 0, useLocal = false;
+  let capabilities = { groq: false, cloudflare: false }, capture = null, cloudActive = false;
+  fetch('/capabilities?token=' + encodeURIComponent(TOKEN), { cache: 'no-store' })
+    .then(response => response.ok ? response.json() : {})
+    .then(value => { capabilities = value; updateMode(); updateButton(); })
+    .catch(() => { updateMode(); updateButton(); });
 
   function setStatus(message, error = false) {
     status.textContent = message;
     status.className = error ? 'error' : '';
   }
   function updateMode() {
-    if (!SR) {
-      mode.disabled = true;
-      button.disabled = true;
-      modeHelp.textContent = 'This browser does not provide SpeechRecognition. You can still type a command below.';
-      setStatus('Speech recognition is unavailable in this browser.', true);
-      return;
-    }
+    const cloud = !!(capabilities.groq || capabilities.cloudflare);
+    if (!SR && mode.value === 'auto' && cloud) modeHelp.textContent = 'Browser recognition is unavailable; Automatic will use your configured web transcription service.';
+    if (!SR && !cloud) { modeHelp.textContent = 'No speech engine is available. Configure a free-tier key in BoneAI, or type below.'; setStatus('Speech recognition is unavailable in this browser.', true); }
     if (!localSupported) {
       mode.querySelector('[value="local"]').disabled = true;
-      if (mode.value === 'local') mode.value = 'auto';
-      modeHelp.textContent = 'On-device speech is not exposed by this browser. Automatic mode uses its browser service; typed commands remain available.';
+      if (mode.value === 'local') modeHelp.textContent = 'On-device speech is not exposed by this browser.';
     } else {
-      modeHelp.textContent = mode.value === 'local' ?
-        'On-device mode avoids the browser speech-service network error after its language model is installed.' :
-        mode.value === 'auto' ? 'Automatic tries a local language model first and uses the browser service if local setup fails.' :
-        'The browser service may need internet and can fail independently of BoneAI.';
+      if (mode.value === 'local') modeHelp.textContent =
+        'On-device mode avoids the browser speech-service network error after its language model is installed.';
     }
+    if (mode.value === 'groq') modeHelp.textContent = capabilities.groq ? 'Groq is configured. Its free tier is rate-limited.' : 'Add a Groq key in BoneAI > Voice.';
+    if (mode.value === 'cloudflare') modeHelp.textContent = capabilities.cloudflare ? 'Cloudflare is configured. Its daily free allocation is limited.' : 'Add a Cloudflare token and Account ID in BoneAI > Voice.';
+    if (mode.value === 'auto' && SR) modeHelp.textContent = 'Automatic tries local, browser, then configured Groq and Cloudflare web fallbacks.';
   }
   updateMode();
   mode.addEventListener('change', () => { if (active) stopListening('Mode changed. Press Start listening.'); updateMode(); });
   language.addEventListener('change', () => { if (active) stopListening('Language changed. Press Start listening.'); });
 
   function updateButton() {
-    button.disabled = preparing || !SR;
+    button.disabled = preparing || (!SR && !capabilities.groq && !capabilities.cloudflare);
     button.textContent = preparing ? 'Preparing speech model…' : active ? 'Stop listening' : 'Start listening';
   }
   function stopListening(message = 'Stopped.') {
@@ -108,6 +111,7 @@
     restartTimer = null;
     if (recognition) { try { recognition.abort(); } catch (_) {} }
     recognition = null;
+    stopCapture();
     updateButton();
     setStatus(message);
   }
@@ -133,24 +137,25 @@
     current.onresult = event => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (!event.results[i].isFinal) continue;
-        const spoken = event.results[i][0].transcript.trim();
-        heard.textContent = 'Heard: ' + spoken;
-        const index = spoken.toLocaleLowerCase().indexOf(WAKE.toLocaleLowerCase());
-        let command = '';
-        if (index >= 0) {
-          command = spoken.slice(index + WAKE.length).replace(/^[ ,:;\-]+/, '').trim();
-          armedUntil = Date.now() + 8000;
-        } else if (Date.now() < armedUntil) {
-          command = spoken;
-          armedUntil = 0;
-        }
-        if (command) void send(command);
+        processTranscript(event.results[i][0].transcript.trim());
       }
     };
     current.onerror = event => {
       if (recognition !== current) return;
       const error = event.error || 'unknown';
       if (error === 'no-speech') { setStatus('No speech heard. Listening again…'); return; }
+      if (mode.value === 'auto' && useLocal) {
+        useLocal = false; recognition = null;
+        setStatus('On-device recognition failed; trying browser speech service…');
+        restartTimer = setTimeout(beginRecognition, 100);
+        return;
+      }
+      if (mode.value === 'auto' && (error === 'network' || error === 'service-not-allowed' || error === 'language-not-supported')
+          && (capabilities.groq || capabilities.cloudflare)) {
+        recognition = null;
+        void startWebFallback().catch(problem => stopListening('Web fallback failed: ' + problem.message));
+        return;
+      }
       active = false;
       if (restartTimer) clearTimeout(restartTimer);
       restartTimer = null;
@@ -163,31 +168,121 @@
     current.onend = () => {
       if (recognition !== current) return;
       recognition = null;
-      if (active) restartTimer = setTimeout(beginRecognition, 1200);
+      if (active && !cloudActive) restartTimer = setTimeout(beginRecognition, 1200);
     };
     try { current.start(); }
     catch (error) { active = false; updateButton(); setStatus('Could not start browser speech: ' + error.message, true); }
   }
   button.addEventListener('click', async () => {
     if (active) { stopListening(); return; }
-    if (preparing || !SR) return;
+    if (preparing || (!SR && !capabilities.groq && !capabilities.cloudflare)) return;
     preparing = true;
     updateButton();
     try {
       useLocal = false;
-      if (mode.value === 'local') {
+      if (mode.value === 'groq' || mode.value === 'cloudflare' || !SR) {
+        if (!capabilities[mode.value] && mode.value !== 'auto') throw new Error('Configure this service in BoneAI Voice settings first.');
+        active = true;
+        await startWebFallback();
+      } else if (mode.value === 'local') {
         if (!localSupported) throw new Error('On-device speech is unavailable in this browser.');
         await ensureLocalModel();
         useLocal = true;
+        active = true; beginRecognition();
       } else if (mode.value === 'auto' && localSupported) {
         try { await ensureLocalModel(); useLocal = true; }
         catch (error) { setStatus('On-device speech unavailable (' + error.message + '). Trying browser service…'); }
+        active = true; beginRecognition();
+      } else {
+        active = true; beginRecognition();
       }
-      active = true;
-      beginRecognition();
-    } catch (error) { setStatus(error.message || 'Speech setup failed.', true); }
+    } catch (error) { active = false; stopCapture(); setStatus(error.message || 'Speech setup failed.', true); }
     finally { preparing = false; updateButton(); }
   });
+
+  function processTranscript(spoken) {
+    heard.textContent = 'Heard: ' + spoken;
+    const index = spoken.toLocaleLowerCase().indexOf(WAKE.toLocaleLowerCase());
+    let command = '';
+    if (index >= 0) {
+      command = spoken.slice(index + WAKE.length).replace(/^[ ,:;\-]+/, '').trim();
+      armedUntil = Date.now() + 8000;
+    } else if (Date.now() < armedUntil) { command = spoken; armedUntil = 0; }
+    if (command) void send(command);
+  }
+
+  function stopCapture() {
+    if (!capture) { cloudActive = false; return; }
+    try { capture.processor.disconnect(); capture.source.disconnect(); capture.stream.getTracks().forEach(track => track.stop()); void capture.context.close(); } catch (_) {}
+    capture = null; cloudActive = false;
+  }
+
+  async function startWebFallback() {
+    if (!active || cloudActive) return;
+    const providers = mode.value === 'groq' || mode.value === 'cloudflare' ? [mode.value] : ['groq', 'cloudflare'].filter(name => capabilities[name]);
+    if (!providers.length) throw new Error('No free-tier web transcription key is configured. Type a command below.');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } });
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const state = { stream, context, source, processor, samples: [], total: 0, speech: false, silence: 0, sending: false, providers };
+    capture = state; cloudActive = true;
+    processor.onaudioprocess = event => {
+      if (!active || capture !== state || state.sending) return;
+      const chunk = event.inputBuffer.getChannelData(0);
+      let energy = 0;
+      for (let i = 0; i < chunk.length; i++) energy += chunk[i] * chunk[i];
+      const speaking = Math.sqrt(energy / chunk.length) > 0.018;
+      if (!state.speech && !speaking) return;
+      state.speech = true;
+      state.samples.push(new Float32Array(chunk)); state.total += chunk.length;
+      state.silence = speaking ? 0 : state.silence + chunk.length / context.sampleRate;
+      if (state.silence > 0.85 || state.total / context.sampleRate > 11) void transcribeCaptured(state);
+    };
+    source.connect(processor); processor.connect(context.destination);
+    setStatus('Listening with ' + providers.join(' → ') + ' (free tiers)…');
+  }
+
+  async function transcribeCaptured(state) {
+    if (state.sending || state.total < state.context.sampleRate / 4) return;
+    state.sending = true;
+    const audio = encodeWav(state.samples, state.total, state.context.sampleRate);
+    state.samples = []; state.total = 0; state.speech = false; state.silence = 0;
+    for (const provider of state.providers) {
+      if (!active || capture !== state) return;
+      setStatus('Transcribing with ' + provider + '…');
+      try {
+        const response = await fetch('/transcribe?provider=' + provider + '&token=' + encodeURIComponent(TOKEN), {
+          method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: audio
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const result = await response.json();
+        if (!result.text) throw new Error('No speech recognized');
+        processTranscript(result.text.trim());
+        if (active && capture === state) { state.sending = false; setStatus('Listening for “' + WAKE + '”…'); }
+        return;
+      } catch (error) { setStatus(provider + ' unavailable (' + error.message + '); trying next fallback…'); }
+    }
+    stopListening('All configured web transcription services failed. Check keys, free-tier limits, or type below.');
+  }
+
+  function encodeWav(chunks, length, inputRate) {
+    const merged = new Float32Array(length); let at = 0;
+    for (const chunk of chunks) { merged.set(chunk, at); at += chunk.length; }
+    const rate = 16000, count = Math.ceil(length * rate / inputRate);
+    const bytes = new ArrayBuffer(44 + count * 2), view = new DataView(bytes);
+    const ascii = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+    ascii(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); ascii(8, 'WAVE'); ascii(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+    view.setUint16(32, 2, true); view.setUint16(34, 16, true); ascii(36, 'data'); view.setUint32(40, count * 2, true);
+    for (let i = 0; i < count; i++) {
+      const source = i * inputRate / rate, low = Math.floor(source), mix = source - low;
+      const value = merged[low] * (1 - mix) + (merged[Math.min(low + 1, length - 1)] || 0) * mix;
+      view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, value)) * 32767, true);
+    }
+    return bytes;
+  }
 
   async function send(text) {
     sendStatus.textContent = 'Submitting command…';

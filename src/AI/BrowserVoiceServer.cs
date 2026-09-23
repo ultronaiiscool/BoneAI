@@ -11,11 +11,12 @@ namespace BoneAI.AI;
 public sealed class BrowserVoiceServer : IDisposable
 {
     private const int MaxHeaderBytes = 16 * 1024;
-    private const int MaxBodyBytes = 8 * 1024;
+    private const int MaxBodyBytes = 2 * 1024 * 1024;
     private readonly ConversationManager _conversation;
     private readonly AgentConfig _config;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _clients = new(8, 8);
+    private readonly WebTranscriptionClient _transcription;
     private TcpListener? _listener;
     private string _token = string.Empty;
     private Task? _loop;
@@ -25,7 +26,7 @@ public sealed class BrowserVoiceServer : IDisposable
     public string Url { get; private set; } = string.Empty;
     public bool Running => _listener != null;
 
-    public BrowserVoiceServer(ConversationManager conversation, AgentConfig config) { _conversation = conversation; _config = config; }
+    public BrowserVoiceServer(ConversationManager conversation, AgentConfig config) { _conversation = conversation; _config = config; _transcription = new WebTranscriptionClient(config); }
 
     public string Start()
     {
@@ -63,7 +64,7 @@ public sealed class BrowserVoiceServer : IDisposable
     {
         if (!await _clients.WaitAsync(0, cancellationToken).ConfigureAwait(false)) { client.Dispose(); return; }
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        requestTimeout.CancelAfter(TimeSpan.FromSeconds(7));
+        requestTimeout.CancelAfter(TimeSpan.FromSeconds(30));
         cancellationToken = requestTimeout.Token;
         using (client)
         {
@@ -73,15 +74,44 @@ public sealed class BrowserVoiceServer : IDisposable
                 await using var stream = client.GetStream();
                 var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
                 if (!HasValidToken(request.Target)) { await ReplyAsync(stream, 403, "text/plain; charset=utf-8", "Forbidden", cancellationToken).ConfigureAwait(false); return; }
-                if (request.Method == "GET")
+                if (request.Method == "GET" && request.Target.StartsWith("/?", StringComparison.Ordinal))
                 {
                     await ReplyAsync(stream, 200, "text/html; charset=utf-8", BrowserVoicePage.Build(_token, _config.VoiceWakeWord.Value), cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (request.Method == "GET" && request.Target.StartsWith("/capabilities?", StringComparison.Ordinal))
+                {
+                    var available = new JObject { ["groq"] = _transcription.HasGroq, ["cloudflare"] = _transcription.HasCloudflare };
+                    await ReplyAsync(stream, 200, "application/json; charset=utf-8", available.ToString(Newtonsoft.Json.Formatting.None), cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (request.Method == "POST" && request.Target.StartsWith("/transcribe?", StringComparison.Ordinal))
+                {
+                    var provider = request.Target.Contains("provider=groq&", StringComparison.Ordinal) ? "groq"
+                        : request.Target.Contains("provider=cloudflare&", StringComparison.Ordinal) ? "cloudflare" : string.Empty;
+                    if (provider.Length == 0 || request.Body.Length is < 44 or > MaxBodyBytes)
+                    {
+                        await ReplyAsync(stream, 400, "application/json; charset=utf-8", "{\"error\":\"Invalid transcription request\"}", cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    try
+                    {
+                        var transcript = await _transcription.TranscribeAsync(provider, request.Body, cancellationToken).ConfigureAwait(false);
+                        var result = new JObject { ["text"] = transcript };
+                        await ReplyAsync(stream, 200, "application/json; charset=utf-8", result.ToString(Newtonsoft.Json.Formatting.None), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentLog.Warn("Web transcription (" + provider + ") failed: " + RuntimeSecrets.Redact(ex.GetBaseException().Message));
+                        await ReplyAsync(stream, 503, "application/json; charset=utf-8", "{\"error\":\"Transcription unavailable\"}", cancellationToken).ConfigureAwait(false);
+                    }
                     return;
                 }
                 if (request.Method != "POST" || !request.Target.StartsWith("/prompt?", StringComparison.Ordinal))
                 {
                     await ReplyAsync(stream, 404, "text/plain; charset=utf-8", "Not found", cancellationToken).ConfigureAwait(false); return;
                 }
+                if (request.Body.Length > 8 * 1024) { await ReplyAsync(stream, 400, "text/plain; charset=utf-8", "Command too large", cancellationToken).ConfigureAwait(false); return; }
                 var text = JObject.Parse(Encoding.UTF8.GetString(request.Body))["text"]?.Value<string>()?.Trim() ?? string.Empty;
                 if (text.Length is < 1 or > 2000) { await ReplyAsync(stream, 400, "text/plain; charset=utf-8", "Invalid command", cancellationToken).ConfigureAwait(false); return; }
                 if (Interlocked.CompareExchange(ref _commandBusy, 1, 0) != 0) { await ReplyAsync(stream, 409, "application/json; charset=utf-8", "{\"accepted\":false,\"reason\":\"busy\"}", cancellationToken).ConfigureAwait(false); return; }
@@ -142,12 +172,12 @@ public sealed class BrowserVoiceServer : IDisposable
 
     private static async Task ReplyAsync(NetworkStream stream, int status, string contentType, string body, CancellationToken cancellationToken)
     {
-        var payload = Encoding.UTF8.GetBytes(body); var reason = status switch { 200 => "OK", 202 => "Accepted", 400 => "Bad Request", 403 => "Forbidden", 409 => "Conflict", _ => "Not Found" };
+        var payload = Encoding.UTF8.GetBytes(body); var reason = status switch { 200 => "OK", 202 => "Accepted", 400 => "Bad Request", 403 => "Forbidden", 409 => "Conflict", 503 => "Service Unavailable", _ => "Not Found" };
         var header = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {payload.Length}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'\r\nPermissions-Policy: on-device-speech-recognition=(self), microphone=(self)\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(header.AsMemory(), cancellationToken).ConfigureAwait(false); await stream.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
     }
 
     private static string Trim(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";
-    public void Dispose() { _lifetime.Cancel(); Stop(); try { _loop?.Wait(500); } catch { } _lifetime.Dispose(); }
+    public void Dispose() { _lifetime.Cancel(); Stop(); try { _loop?.Wait(500); } catch { } _transcription.Dispose(); _lifetime.Dispose(); }
     private sealed record HttpRequest(string Method, string Target, byte[] Body);
 }

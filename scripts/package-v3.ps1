@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$NativeLibraryPath,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [string]$Version = '3.2.0'
+    [string]$Version = '3.3.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,11 +27,11 @@ Copy-Item -LiteralPath $dll -Destination (Join-Path $mods 'BoneAI.dll')
 Copy-Item -LiteralPath $native -Destination (Join-Path $userLibs 'libcodex_app_server.so')
 $hash = (Get-FileHash -LiteralPath (Join-Path $userLibs 'libcodex_app_server.so') -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $userLibs 'libcodex_app_server.so.sha256'), "$hash  libcodex_app_server.so`n")
-foreach ($name in @('README.md', 'QUEST-README.md', 'INSTALL-FIRST.md', 'CHANGELOG.md', 'RELEASE-v3.2.0.md', 'LICENSE', 'manifest.json', 'icon.png')) {
+foreach ($name in @('README.md', 'QUEST-README.md', 'INSTALL-FIRST.md', 'CHANGELOG.md', 'RELEASE-v3.3.0.md', 'LICENSE', 'manifest.json', 'icon.png')) {
     Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $target $name)
 }
 Copy-Item -LiteralPath (Join-Path $repo 'native/README.md') -Destination (Join-Path $target 'NATIVE-SOURCE.md')
-Copy-Item -LiteralPath (Join-Path $repo 'docs/TESTING-v3.2.0.md') -Destination (Join-Path $target 'TESTING-v3.2.0.md')
+Copy-Item -LiteralPath (Join-Path $repo 'docs/TESTING-v3.3.0.md') -Destination (Join-Path $target 'TESTING-v3.3.0.md')
 Copy-Item -LiteralPath (Join-Path $repo 'native/codex-android-source-v3.zip') -Destination (Join-Path $target 'codex-android-source-v3.zip')
 
 foreach ($name in @('NOTICE', 'THIRD_PARTY_LICENSES.txt', 'THIRD_PARTY_LICENSES.md', 'LICENSE')) {

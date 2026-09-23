@@ -32,6 +32,7 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<float> VoiceSilenceThreshold { get; }
     public MelonPreferences_Entry<float> VoiceSilenceSeconds { get; }
     public MelonPreferences_Entry<int> VoiceMaxSeconds { get; }
+    public MelonPreferences_Entry<string> CloudflareAccountId { get; }
 
     public AgentConfig()
     {
@@ -64,5 +65,6 @@ public sealed class AgentConfig
         VoiceSilenceThreshold = category.CreateEntry("VoiceSilenceThreshold", 0.015f);
         VoiceSilenceSeconds = category.CreateEntry("VoiceSilenceSeconds", 0.9f);
         VoiceMaxSeconds = category.CreateEntry("VoiceMaxSeconds", 12);
+        CloudflareAccountId = category.CreateEntry("CloudflareAccountId", string.Empty);
     }
 }
