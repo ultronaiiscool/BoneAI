@@ -35,9 +35,10 @@ public static class ToolSchemaCatalog
             "world.look_at_target" => Object(F("distance", Number())),
             "avatar.list" or "avatar.find" or "player.list_avatars" or "spawn.list" =>
                 Object(F("query", Text()), F("limit", Integer())),
+            "spawn.status" => Object(F("actionId", Text(), true)),
             "avatar.set" or "player.set_avatar" => Object(F("query", Text()), F("barcode", Text())),
             "spawn.spawn" or "spawn.spawn_item" or "spawn.spawn_npc" or "spawn.spawn_prop" or
-            "spawn.spawn_vehicle" or "spawn.find_and_spawn" => Object(F("query", Text()), F("barcode", Text())),
+            "spawn.spawn_vehicle" or "spawn.find_and_spawn" => Object(F("query", Text()), F("barcode", Text()), F("position", Vector()), F("rotation", Vector())),
             "player.teleport" => Object(F("position", Vector(), true), F("rotation", Vector())),
             "player.set_health" or "player.set_strength" or "player.set_speed" or "player.set_jump" =>
                 Object(F("value", Number(), true)),

@@ -19,6 +19,9 @@ public sealed class FusionBridge
     private Type? _playerSender;
     private Type? _localAvatar;
     private Type? _sceneManager;
+    private Type? _networkSpawner;
+    private Type? _spawnRequestType;
+    private MethodInfo? _networkSpawn;
     private object? _marrowEntityCache;
     private object? _pooleeCache;
     private MethodInfo? _marrowCacheGet;
@@ -43,6 +46,10 @@ public sealed class FusionBridge
         _playerSender = _assembly.GetType("LabFusion.Senders.PlayerSender");
         _localAvatar = _assembly.GetType("LabFusion.Player.LocalAvatar");
         _sceneManager = _assembly.GetType("LabFusion.Scene.NetworkSceneManager");
+        _networkSpawner = _assembly.GetType("LabFusion.RPC.NetworkAssetSpawner");
+        _spawnRequestType = _networkSpawner?.GetNestedType("SpawnRequestInfo", BindingFlags.Public);
+        _networkSpawn = _networkSpawner?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "Spawn" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == _spawnRequestType);
         _marrowEntityCache = _assembly.GetType("LabFusion.Entities.IMarrowEntityExtender")?
             .GetField("Cache", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
         _pooleeCache = _assembly.GetType("LabFusion.Marrow.Extenders.PooleeExtender")?
@@ -50,6 +57,63 @@ public sealed class FusionBridge
         _marrowCacheGet = _marrowEntityCache?.GetType().GetMethod("Get", BindingFlags.Public | BindingFlags.Instance);
         _pooleeCacheGet = _pooleeCache?.GetType().GetMethod("Get", BindingFlags.Public | BindingFlags.Instance);
         AgentLog.Info($"Fusion bridge loaded for {_assembly.GetName().Version}.");
+    }
+
+    private sealed class SpawnCallbackSink
+    {
+        private readonly Action<GameObject?, string?> _onComplete;
+        public SpawnCallbackSink(Action<GameObject?, string?> onComplete) => _onComplete = onComplete;
+        public void Complete<T>(T value)
+        {
+            var type = typeof(T);
+            var spawned = type.GetField("Spawned")?.GetValue(value) as GameObject;
+            var entity = type.GetField("Entity")?.GetValue(value);
+            var id = entity?.GetType().GetProperty("ID")?.GetValue(entity)?.ToString();
+            _onComplete(spawned, id);
+        }
+    }
+
+    /// <summary>Use Fusion's existing reliable server spawn request; callback confirms only this client's spawn.</summary>
+    public uint RequestNetworkSpawn(Spawnable spawnable, Vector3 position, Quaternion rotation, Action<GameObject?, string?> onComplete)
+    {
+        if (!IsSceneNetworked) throw new InvalidOperationException("Fusion is not running a networked level.");
+        var localId = _playerManager?.GetProperty("LocalID", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+        var preventSpawn = _assembly?.GetType("LabFusion.Utilities.FusionDevTools")?
+            .GetMethod("PreventSpawnGun", BindingFlags.Public | BindingFlags.Static);
+        if (localId == null || preventSpawn == null)
+            throw new InvalidOperationException("Fusion spawn permissions could not be verified; request blocked.");
+        if (preventSpawn.Invoke(null, new[] { localId }) is true)
+            throw new InvalidOperationException("Fusion lobby or gamemode permissions prevent spawning.");
+        if (_spawnRequestType == null || _networkSpawn == null)
+            throw new MissingMethodException("LabFusion.RPC.NetworkAssetSpawner.Spawn");
+        var request = Activator.CreateInstance(_spawnRequestType) ?? throw new InvalidOperationException("Could not create Fusion spawn request.");
+        void Set(string field, object value) => (_spawnRequestType.GetField(field) ?? throw new MissingFieldException(_spawnRequestType.FullName, field)).SetValue(request, value);
+        Set("Spawnable", spawnable);
+        Set("Position", position);
+        Set("Rotation", rotation);
+        Set("SpawnEffect", true);
+        var sourceField = _spawnRequestType.GetField("SpawnSource") ?? throw new MissingFieldException(_spawnRequestType.FullName, "SpawnSource");
+        Set("SpawnSource", Enum.Parse(sourceField.FieldType, "Player"));
+        var callbackField = _spawnRequestType.GetField("SpawnCallback") ?? throw new MissingFieldException(_spawnRequestType.FullName, "SpawnCallback");
+        var callbackArgument = callbackField.FieldType.GetGenericArguments().Single();
+        var sink = new SpawnCallbackSink(onComplete);
+        var callbackMethod = typeof(SpawnCallbackSink).GetMethod(nameof(SpawnCallbackSink.Complete))!.MakeGenericMethod(callbackArgument);
+        Set("SpawnCallback", Delegate.CreateDelegate(callbackField.FieldType, sink, callbackMethod));
+        var trackerField = _networkSpawner?.GetField("_lastTrackedSpawnable", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new MissingFieldException("LabFusion.RPC.NetworkAssetSpawner._lastTrackedSpawnable");
+        var tracker = (uint)(trackerField.GetValue(null) ?? throw new InvalidOperationException("Fusion spawn tracker unavailable."));
+        try { _networkSpawn.Invoke(null, new[] { request }); }
+        catch (TargetInvocationException ex) { ExpireNetworkSpawnCallback(tracker); throw ex.InnerException ?? ex; }
+        catch { ExpireNetworkSpawnCallback(tracker); throw; }
+        return tracker;
+    }
+
+    /// <summary>Remove a callback abandoned by Fusion after no response; never alters a spawned entity.</summary>
+    public void ExpireNetworkSpawnCallback(uint tracker)
+    {
+        var callbacks = _networkSpawner?.GetField("_callbackQueue", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null)
+            as System.Collections.IDictionary;
+        callbacks?.Remove(tracker);
     }
 
     /// <summary>Fail closed before changing a multiplayer-visible object locally.</summary>
@@ -184,7 +248,7 @@ public sealed class FusionBridge
     public object GetSynchronizationReport() => new
     {
         directFusion = new[] { "avatar changes through LocalAvatar.SwapAvatarCrate", "remote-player damage through PlayerSender.SendPlayerDamage", "player/rig discovery through NetworkPlayer.Players" },
-        ordinaryFusionPatches = new[] { "SpawnLab network spawn requests", "locally owned prop transforms", "grabs/releases", "gun shots", "NPC damage/death", "seats" },
+        ordinaryFusionPatches = new[] { "BoneAI spawn requests through NetworkAssetSpawner", "locally owned prop transforms", "grabs/releases", "gun shots", "NPC damage/death", "seats" },
         localOnly = new[] { "local health overrides", "strength/speed/vitality overrides", "Codex conversation and UI" },
         note = "Object mutation now requires confirmed local Fusion ownership. A local API call is not proof that peers received the result; spawn and asynchronous actions remain pending until independently observed."
     };

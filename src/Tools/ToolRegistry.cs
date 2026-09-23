@@ -76,7 +76,7 @@ public sealed class ToolRegistry
     public string[] SelectForPrompt(string prompt, int limit)
     {
         var words = new HashSet<string>((prompt ?? string.Empty).ToLowerInvariant().Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ':', ';', '/', '_', '-' }, StringSplitOptions.RemoveEmptyEntries));
-        var mandatory = new HashSet<string>(new[] { "tools.search", "tools.list_categories", "player.get_state", "world.look_at_target", "world.find_nearest", "fusion.get_session" }, StringComparer.OrdinalIgnoreCase);
+        var mandatory = new HashSet<string>(new[] { "tools.search", "tools.list_categories", "player.get_state", "world.look_at_target", "world.find_nearest", "fusion.get_session", "spawn.status" }, StringComparer.OrdinalIgnoreCase);
         return _descriptions
             .Select(x => new
             {

@@ -3,6 +3,9 @@ using BoneLib.BoneMenu;
 using BoneLib.BoneMenu.UI;
 using BoneLib.Notifications;
 using Il2CppTMPro;
+using BoneAI.Tools;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 using UIRig = Il2CppSLZ.Bonelab.UIRig;
@@ -23,6 +26,9 @@ public sealed class AgentMenu
     private StringElement? _loginCode;
     private StringElement? _providerKey;
     private StringElement? _runtimeStatus;
+    private StringElement? _spawnQuery;
+    private StringElement? _spawnStatus;
+    private string? _lastSpawnActionId;
     private bool _clearingProviderKey;
     private GameObject? _nativeButton;
     private float _nextRefresh;
@@ -48,6 +54,14 @@ public sealed class AgentMenu
 
         _conversations = _root.CreatePage("Conversations", cyan, 8);
         BuildConversations();
+
+        var spawns = _root.CreatePage("Spawn Catalog", mint, 8);
+        _spawnQuery = spawns.CreateString("Name or Barcode", Color.white, string.Empty, _ => { });
+        _spawnStatus = spawns.CreateString("Last spawn", Color.white, "None", _ => { });
+        spawns.CreateFunction("Search loaded spawnables", cyan, () => _ = SearchSpawnsAsync());
+        spawns.CreateFunction("Spawn unique match", mint, () => _ = SpawnFromMenuAsync());
+        spawns.CreateFunction("Check last spawn", Color.yellow, () => _ = CheckLastSpawnAsync());
+        spawns.CreateFunction("Refresh catalog", Color.white, () => _ = RefreshSpawnsAsync());
 
         var voice = _root.CreatePage("Voice · Beta", orange, 9);
         Bind(voice, "Voice AI Beta", _mod.Config.VoiceBetaEnabled);
@@ -161,6 +175,40 @@ public sealed class AgentMenu
     }
 
     private void SendPrompt() { var value = _prompt?.Value ?? string.Empty; if (string.IsNullOrWhiteSpace(value)) return; if (_prompt != null) _prompt.Value = string.Empty; _ = _mod.Conversation.SendAsync(value); }
+    private async Task SearchSpawnsAsync()
+    {
+        var result = await _mod.Tools.ExecuteAsync(new ToolCall { Name = "spawn.list", Arguments = new JObject { ["query"] = _spawnQuery?.Value ?? string.Empty, ["limit"] = 8 } }, CancellationToken.None).ConfigureAwait(false);
+        var items = result.Data == null ? new JArray() : JArray.FromObject(result.Data);
+        var summary = result.Result == "success" ? string.Join("; ", items.Take(5).Select(x => x["title"] + " (" + x["barcode"] + ")")) : result.Reason ?? "Catalog unavailable";
+        await _mod.Dispatcher.InvokeAsync(() => { Notify("Spawn catalog", Trim(string.IsNullOrWhiteSpace(summary) ? "No matches" : summary, 450)); return true; }).ConfigureAwait(false);
+    }
+    private async Task SpawnFromMenuAsync()
+    {
+        var query = _spawnQuery?.Value?.Trim();
+        if (string.IsNullOrWhiteSpace(query)) { Notify("Spawn catalog", "Enter a name or barcode first."); return; }
+        var result = await _mod.Tools.ExecuteAsync(new ToolCall { Name = "spawn.spawn", Arguments = new JObject { ["query"] = query } }, CancellationToken.None).ConfigureAwait(false);
+        await _mod.Dispatcher.InvokeAsync(() =>
+        {
+            if (result.Result == "pending") _lastSpawnActionId = result.ActionId;
+            var message = result.Result == "pending" ? "Requested " + query + ". Choose Check last spawn for confirmation." : result.Reason ?? result.Result;
+            if (_spawnStatus != null) _spawnStatus.Value = Trim(message, 100);
+            Notify("Spawn catalog", Trim(message, 450));
+            return true;
+        }).ConfigureAwait(false);
+    }
+    private async Task CheckLastSpawnAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lastSpawnActionId)) { Notify("Spawn catalog", "No spawn was requested from this menu yet."); return; }
+        var result = await _mod.Tools.ExecuteAsync(new ToolCall { Name = "spawn.status", Arguments = new JObject { ["actionId"] = _lastSpawnActionId } }, CancellationToken.None).ConfigureAwait(false);
+        var message = result.Result == "success" ? "Spawn confirmed on this client; peer visibility is not confirmed." : result.Reason ?? "Still waiting for local confirmation.";
+        await _mod.Dispatcher.InvokeAsync(() => { if (_spawnStatus != null) _spawnStatus.Value = Trim(message, 100); Notify("Spawn catalog", Trim(message, 450)); return true; }).ConfigureAwait(false);
+    }
+    private async Task RefreshSpawnsAsync()
+    {
+        var result = await _mod.Tools.ExecuteAsync(new ToolCall { Name = "spawn.refresh" }, CancellationToken.None).ConfigureAwait(false);
+        var message = result.Result == "success" ? JsonConvert.SerializeObject(result.Data) : result.Reason ?? "Catalog refresh failed";
+        await _mod.Dispatcher.InvokeAsync(() => { Notify("Spawn catalog", Trim(message, 450)); return true; }).ConfigureAwait(false);
+    }
     private void ShowResponse() => Notify("BoneAI", Trim(_mod.Conversation.LastResponse, 480));
     private void SetProviderApiKey(string value)
     {

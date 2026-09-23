@@ -1,12 +1,11 @@
 {
   "name": "BoneAI",
-  "version_number": "3.0.1",
+  "version_number": "3.1.0",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
-  "description": "BoneAI v3: native Quest Codex account sign-in, OpenRouter Free, voice beta, game tools, SpawnLab, and Fusion.",
+  "description": "BoneAI v3.1: built-in spawn catalog and Fusion-aware spawning, Quest Codex sign-in, voice beta, and game tools.",
   "dependencies": [
     "LavaGang-MelonLoader-0.7.3",
     "bonelib-BoneLib-3.2.2",
-    "Lakatrazz-Fusion-1.14.2",
-    "ChappieStudios-SpawnLab-1.0.1"
+    "Lakatrazz-Fusion-1.14.2"
   ]
 }

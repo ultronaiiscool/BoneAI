@@ -4,7 +4,7 @@ BoneAI v3 uses the same `BoneAI.dll` on PCVR and Quest. The optional Quest Codex
 
 ## Install
 
-1. Install a LemonLoader version and BoneLib build compatible with your exact BONELAB Quest patch. Fusion and SpawnLab are optional for their corresponding features.
+1. Install a LemonLoader version and BoneLib build compatible with your exact BONELAB Quest patch. Fusion is needed for multiplayer features; SpawnLab is not required.
 2. Copy `Mods/BoneAI.dll` from the v3 package into LemonLoader's `Mods` directory.
 3. For Codex account mode, copy `UserLibs/libcodex_app_server.so` and `UserLibs/libcodex_app_server.so.sha256` into LemonLoader's `UserLibs` directory. The library is about 256 MB and BoneAI keeps a private runtime copy on the headset.
 4. Launch BONELAB. Open **Preferences → BoneAI → AI Provider → Codex account sign-in**, then **Codex Account → Sign In With Codex**.

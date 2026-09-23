@@ -30,7 +30,7 @@ public sealed class GameToolset
     private readonly AgentConfig _config;
     private readonly FusionBridge _fusion;
     private readonly ObjectRegistry _objects = new();
-    private readonly SpawnLabBridge _spawnLab = new();
+    private readonly SpawnController _spawns;
     private readonly AvatarCatalogProvider _avatarCatalog;
     private readonly Dictionary<string, float> _avatarDefaults = new();
     private Vector3? _moveDestination;
@@ -48,11 +48,13 @@ public sealed class GameToolset
     private long _worldCacheHits;
     private double _worldScanMilliseconds;
     private float _nextObjectPrune;
+    private float _nextSpawnSweep;
 
     public GameToolset(AgentConfig config, FusionBridge fusion)
     {
         _config = config;
         _fusion = fusion;
+        _spawns = new SpawnController(fusion);
         _avatarCatalog = new AvatarCatalogProvider(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UserData"));
         _ = RefreshAvatarCatalogAsync();
     }
@@ -88,14 +90,15 @@ public sealed class GameToolset
         Register(r, "world.look_at_target", "Raycast from the player's view and return the object currently being looked at. optional arguments: distance.", LookAtTarget);
         Register(r, "world.find_nearest", "Find the nearest matching world object and return one stable object ID. arguments: optional query, kind (npc/interactable/object), radius.", FindNearest);
         Register(r, "world.get_scene_info", "Get active scene and object counts.", SceneInfo);
-        Register(r, "spawn.list", "Search SpawnLab's complete base-game and downloaded SDK spawnable catalog. arguments: query, optional limit.", SearchSpawnables);
-        Register(r, "spawn.refresh", "Tell SpawnLab to rescan pallet files and rebuild its catalog.", RefreshSpawnLab, action:true, spawn:true);
-        Register(r, "spawn.spawn", "Spawn a catalog item using its exact barcode or fuzzy name. arguments: barcode or query, optional position.", Spawn, action:true, spawn:true);
+        Register(r, "spawn.list", "Search the loaded Marrow warehouse's base-game and installed-mod spawnables. arguments: query, optional limit.", SearchSpawnables);
+        Register(r, "spawn.refresh", "Refresh BoneAI's live spawnable catalog from the Marrow warehouse.", RefreshSpawns, action:true, spawn:true);
+        Register(r, "spawn.status", "Check the actual local callback result of a prior spawn request. arguments: actionId.", SpawnStatus);
+        Register(r, "spawn.spawn", "Spawn a loaded item by exact barcode or unique name. Optional position {x,y,z} and rotation {x,y,z}. Online requests use Fusion's network spawner.", Spawn, action:true, spawn:true);
         Register(r, "spawn.spawn_item", "Spawn any item from the runtime catalog. arguments: barcode or query, optional position.", Spawn, action:true, spawn:true);
         Register(r, "spawn.spawn_npc", "Spawn an NPC from the runtime catalog. arguments: barcode or query, optional position.", Spawn, action:true, spawn:true);
         Register(r, "spawn.spawn_prop", "Spawn a prop from the runtime catalog. arguments: barcode or query, optional position.", Spawn, action:true, spawn:true);
         Register(r, "spawn.spawn_vehicle", "Spawn a vehicle from the runtime catalog. arguments: barcode or query, optional position.", Spawn, action:true, spawn:true);
-        Register(r, "spawn.find_and_spawn", "Fuzzy-search SpawnLab and immediately spawn the best unique match. arguments: query.", Spawn, action:true, spawn:true);
+        Register(r, "spawn.find_and_spawn", "Search BoneAI's live catalog and spawn only a unique match. arguments: query.", Spawn, action:true, spawn:true);
         Register(r, "spawn.despawn", "Despawn/destroy a registered spawned or scene object. arguments: objectId.", Despawn, action:true);
         Register(r, "interaction.grab", "Attach a nearby object's grip to a local hand. arguments: objectId, hand ('left' or 'right').", Grab, action:true);
         Register(r, "interaction.release", "Release the object in a local hand. arguments: hand.", Release, action:true);
@@ -151,7 +154,7 @@ public sealed class GameToolset
 
     private void RegisterExpandedTools(ToolRegistry r)
     {
-        bool Room() => r.Count < 350;
+        bool Room() => r.Count < 351;
         foreach (var component in new[]
         {
             "Rigidbody","Grip","Gun","Magazine","AmmoReceiver","Chamber","FirearmCartridge","PuppetMaster","BehaviourBaseNav","AIBrain","Enemy_Health",
@@ -179,7 +182,7 @@ public sealed class GameToolset
         {
             if (!Room()) break;
             var captured = preset;
-            Register(r, "spawn.preset_" + Slug(captured), $"Search the complete SpawnLab catalog for '{captured}' and spawn the best match. Optional arguments: query or barcode.", c => SpawnPreset(c, captured), action:true, spawn:true);
+            Register(r, "spawn.preset_" + Slug(captured), $"Search the live Marrow catalog for '{captured}' and spawn a unique match. Optional arguments: query or barcode.", c => SpawnPreset(c, captured), action:true, spawn:true);
         }
 
         foreach (var verb in new[]
@@ -471,20 +474,40 @@ public sealed class GameToolset
 
     private ToolResult SearchSpawnables(ToolCall c)
     {
-        var query=c.Arguments["query"]?.Value<string>()??string.Empty; var limit=c.Arguments["limit"]?.Value<int>()??20;
-        return ToolResult.Success(c,SpawnCatalog().OrderBy(x=>Score(x.title,query)).Take(limit).ToArray());
+        var query=c.Arguments["query"]?.Value<string>()??string.Empty; var limit=Math.Clamp(c.Arguments["limit"]?.Value<int>()??20,1,100);
+        return ToolResult.Success(c,SpawnCatalog().OrderBy(x=>Score(x.Title,query)).Take(limit)
+            .Select(x=>new{title=x.Title,barcode=x.Barcode,source=x.Source,category=x.Category,loaded=true}).ToArray());
     }
-    private ToolResult RefreshSpawnLab(ToolCall c){_spawnLab.Refresh();return ToolResult.Success(c,new{provider="SpawnLab",count=_spawnLab.GetEntries().Count});}
+    private ToolResult RefreshSpawns(ToolCall c)=>ToolResult.Success(c,new{provider="Marrow warehouse",count=_spawns.Refresh()});
+    private ToolResult SpawnStatus(ToolCall c)
+    {
+        var actionId=Str(c,"actionId");
+        var attempt=_spawns.GetAttempt(actionId);
+        if(attempt==null)return ToolResult.Failure(c,"No recent spawn request has that action ID.");
+        var spawned=attempt.Spawned;
+        var data=new{requestedActionId=actionId,state=attempt.State,title=attempt.Entry.Title,barcode=attempt.Entry.Barcode,
+            objectId=spawned==null?null:SafeRegister(spawned),networkRequested=attempt.NetworkRequested,
+            networkEntityId=attempt.NetworkEntityId,peerConfirmed=false,error=attempt.Error};
+        if(attempt.State=="failed")return ToolResult.Failure(c,attempt.Error??"Spawn failed.");
+        if(attempt.State=="confirmed_local")return ToolResult.Success(c,data);
+        return ToolResult.Pending(c,data,attempt.Error??"No local spawn callback has confirmed this request. Fusion peer visibility is not independently confirmed.");
+    }
     private ToolResult Spawn(ToolCall c)
     {
         var request=c.Arguments["barcode"]?.Value<string>()??Str(c,"query");
-        if(!_spawnLab.Available)return ToolResult.Failure(c,"SpawnLab is not loaded; spawning was not attempted.");
-        if(c.Arguments["position"]!=null)return ToolResult.Failure(c,"SpawnLab chooses its front-of-player transform and does not expose an arbitrary-position API.");
-        var entry=_spawnLab.Spawn(request);
-        // SpawnLab's private Spawn method is fire-and-forget and handles its own errors.
-        // Returning success here would falsely claim that a Poolee exists or peers received it.
-        return ToolResult.Pending(c,new{provider="SpawnLab",title=entry.Title,barcode=entry.Barcode,source=entry.Source,confirmed=false},
-            "SpawnLab invocation returned, but the spawned object is not confirmed. Query nearby objects before claiming completion.");
+        if(_fusion.IsOnline&&!_config.FusionSynchronization.Value)
+            return ToolResult.Failure(c,"Fusion synchronization is disabled; refusing an online local-only spawn.");
+        var head=Player.Head;
+        if(head==null)return ToolResult.Failure(c,"Player head is not available for a safe spawn position.");
+        var forward=head.forward; forward.y=0;
+        if(forward.sqrMagnitude<0.001f)forward=Vector3.forward;
+        forward.Normalize();
+        var position=Vec(c.Arguments["position"],head.position+forward*1.25f+Vector3.down*0.12f);
+        var rotation=Quaternion.Euler(Vec(c.Arguments["rotation"],Quaternion.LookRotation(forward,Vector3.up).eulerAngles));
+        var attempt=_spawns.Spawn(c.Id,request,position,rotation);
+        return ToolResult.Pending(c,new{provider="BoneAI",title=attempt.Entry.Title,barcode=attempt.Entry.Barcode,
+            actionId=c.Id,networkRequested=attempt.NetworkRequested,position=V(position),confirmed=false},
+            "Spawn requested. Call spawn.status with this actionId to check local completion; peer visibility still requires a second-client check.");
     }
     private ToolResult Despawn(ToolCall c){var go=NeedObject(c);var sync=RequireOwnedNetworkObject(go);var poolee=FindComponentByName(go,"Poolee");var method=poolee?.GetType().GetMethod("Despawn",Type.EmptyTypes);if(method!=null){method.Invoke(poolee,null);return ToolResult.Pending(c,new{path="Poolee.Despawn",synchronization=sync},"Despawn was requested; object removal and peer replication are not yet confirmed.");}return ToolResult.Failure(c,"Object is not a pooled spawnable and was not destroyed locally.");}
 
@@ -652,12 +675,12 @@ public sealed class GameToolset
     {
         bool Has(string name)=>AppDomain.CurrentDomain.GetAssemblies().Any(a=>a.GetName().Name==name);
         return ToolResult.Success(c,new object[]{
-            new{name="SpawnLab",loaded=Has("SpawnLab"),usable=true,integration="spawn catalog and Fusion-aware spawn path"},
+            new{name="BoneAI Spawner",loaded=true,usable=true,integration="live Marrow catalog, local spawn callbacks, and Fusion network requests without SpawnLab"},
             new{name="LabFusion",loaded=Has("LabFusion"),usable=true,integration="session/player queries and existing action replication"},
             new{name="Force Pull Anything",loaded=Has("Force Pull Anything"),usable=true,integration="its Grip patch automatically improves agent grip pulls"},
             new{name="StrengthMod",loaded=Has("StrengthMod"),usable=true,integration="coexists; agent runtime avatar overrides remain separate"},
             new{name="Stat Changer",loaded=Has("Stat_Changer__Simple_Edition_"),usable=true,integration="verified speed/jump fields informed agent modifiers"},
-            new{name="QuickItem",loaded=Has("QuickItem"),usable=false,integration="private saved-item workflow; SpawnLab is used instead"},
+            new{name="QuickItem",loaded=Has("QuickItem"),usable=false,integration="private saved-item workflow; BoneAI uses its own spawner"},
             new{name="PowerTools",loaded=Has("PowerTools"),usable=false,integration="global cheats deliberately not changed implicitly"},
             new{name="Portals",loaded=Has("Portals"),usable=false,integration="portal spawning is local AssetSpawner and not claimed network-safe"},
             new{name="Echolocation",loaded=Has("Echolocation"),usable=false,integration="internal perception cache is non-public; Fusion players queried directly"},
@@ -686,6 +709,7 @@ public sealed class GameToolset
             catch (Exception ex) { AgentLog.Warn("Avatar catalog validation failed: " + ex.GetBaseException().Message); }
         }
         if (Time.unscaledTime >= _nextObjectPrune) { _objects.Prune(); _nextObjectPrune = Time.unscaledTime + 2f; }
+        if (Time.unscaledTime >= _nextSpawnSweep) { _spawns.SweepExpiredRequests(); _nextSpawnSweep = Time.unscaledTime + 5f; }
         if(_followObject!=null&&_objects.TryGet(_followObject,out var target))_moveDestination=target.transform.position-target.transform.forward*1.5f;
         if(_moveDestination is not Vector3 destination||Player.RigManager==null)return; var rig=Player.RigManager;var current=rig.transform.position;var flat=new Vector3(destination.x,current.y,destination.z);if(Vector3.Distance(current,flat)<0.15f){if(_followObject==null)_moveDestination=null;return;}var next=Vector3.MoveTowards(current,flat,_moveSpeed*Time.deltaTime);rig.Teleport(next,rig.transform.eulerAngles,true);
     }
@@ -756,7 +780,7 @@ public sealed class GameToolset
         if (scene == _cachedScene) return;
         _cachedScene = scene; _componentCache.Clear(); _semanticCache.Clear(); _nearbyCache.Clear(); _nearbyExpiresAt = 0;
     }
-    private IEnumerable<(string title,string barcode,string source,string category,bool downloaded)> SpawnCatalog()=>_spawnLab.GetEntries().Select(x=>(x.Title,x.Barcode,x.Source,x.Category,x.Downloaded));
+    private IReadOnlyList<SpawnCatalogEntry> SpawnCatalog()=>_spawns.GetEntries();
     private static int Score(string value,string query){if(string.IsNullOrWhiteSpace(query))return 0;value=value.ToLowerInvariant();query=query.ToLowerInvariant();if(value==query)return 0;if(value.Contains(query))return 1+value.IndexOf(query);return Levenshtein(value,query)+20;}
     private static int Levenshtein(string a,string b){var d=new int[b.Length+1];for(var j=0;j<=b.Length;j++)d[j]=j;for(var i=1;i<=a.Length;i++){var prev=d[0];d[0]=i;for(var j=1;j<=b.Length;j++){var old=d[j];d[j]=Math.Min(Math.Min(d[j]+1,d[j-1]+1),prev+(a[i-1]==b[j-1]?0:1));prev=old;}}return d[b.Length];}
     private GameObject NeedObject(ToolCall c){var id=Str(c,"objectId");if(!_objects.TryGet(id,out var go))throw new InvalidOperationException("Object handle is missing or expired: "+id);return go;}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.0 — Built-in spawning
+
+- Removed the SpawnLab runtime and Thunderstore dependency. BoneAI now indexes the loaded Marrow warehouse itself, including base-game and installed-mod spawnables.
+- Added exact-barcode and unique-name resolution, ambiguity errors, a selectable spawn position/rotation, `spawn.status` for local callback results, and a manual Spawn Catalog Preferences page.
+- Offline spawning uses BONELAB's `AssetSpawner`. Fusion sessions use the verified `NetworkAssetSpawner` server request, with a local permission/gamemode check; requests are blocked rather than silently spawning only locally when network synchronization is unavailable.
+- Time-bounded unanswered Fusion callback registrations and kept peer visibility explicitly unconfirmed without a second-client observation.
+- Added spawn-catalog matching tests. No third-party SpawnLab code or DLL is redistributed, and there is no autoupdater.
+- The Android native Codex library is unchanged from v3; physical Quest and two-client Fusion testing are still required.
+
 ## 3.0.1 — Reliability and truthful action results
 
 - Fixed cancellation of queued game actions so they cannot run after cancellation; actions already executing now return their real result rather than a misleading cancelled result.

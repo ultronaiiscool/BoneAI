@@ -30,9 +30,9 @@ For native source provenance and the security boundary, see [native/README.md](n
 - Internet access and either Codex account sign-in or a key for a supported API provider
 - Codex CLI/App Server on PCVR only if you choose account sign-in; Quest account mode uses the bundled Android native library
 - LabFusion `1.14.2` for multiplayer features (optional for offline play)
-- SpawnLab `1.0.1` for spawning (BoneAI still loads without it, but spawn tools report that the provider is unavailable)
+- No SpawnLab installation is needed. BoneAI reads the game's live Marrow spawnable warehouse and uses BONELAB spawning offline or Fusion's network spawner online.
 
-The v3 Quest bundle includes BoneAI's DLL and the Android native App Server library. BoneLib, Fusion, SpawnLab, and BONELAB belong to their respective authors and must be installed separately.
+The v3.1 Quest bundle includes BoneAI's DLL and the Android native App Server library. BoneLib, Fusion, and BONELAB belong to their respective authors and must be installed separately. SpawnLab is neither bundled nor required.
 
 ### Install BoneAI
 
@@ -54,7 +54,6 @@ BONELAB/
 ├─ Mods/
 │  ├─ BoneLib.dll
 │  ├─ LabFusion.dll                 (optional, for multiplayer)
-│  ├─ SpawnLab.dll                  (required only for spawning)
 │  └─ BoneAI.dll
 └─ UserLibs/
    ├─ libcodex_app_server.so       (Quest Codex only)
@@ -94,14 +93,14 @@ Use **Open Sign-In Page Again** if the browser was closed. Codex App Server secu
 
 ## Standalone Quest setup — no PC
 
-1. Install the universal `BoneAI.dll` with LemonLoader and Quest-compatible BoneLib/Fusion/SpawnLab versions matching your BONELAB patch.
+1. Install the universal `BoneAI.dll` with LemonLoader and Quest-compatible BoneLib/Fusion versions matching your BONELAB patch. SpawnLab is not required.
 2. For Codex account mode, place the bundled `libcodex_app_server.so` and `libcodex_app_server.so.sha256` in LemonLoader's `UserLibs` folder. This beta needs roughly 260 MB for the library plus space for a private runtime copy.
 3. Start BONELAB and open **Preferences → BoneAI → AI Provider**.
 4. Choose **Codex account sign-in** and then **Codex Account → Sign In With Codex**. Complete the code in the browser and return to BONELAB.
 5. Alternatively, choose **Free OpenRouter** and enter your key in **API Key (saved securely)**.
 6. Open **Assistant · Home**.
 
-All inference requests and tool-call loops run from the headset. A PC, Python bridge, remote WebSocket host, and Codex CLI are not used in this mode. The universal DLL is managed AnyCPU; exact Quest compatibility still depends on matching BONELAB, LemonLoader, BoneLib, Fusion, and SpawnLab versions.
+All inference requests and tool-call loops run from the headset. A PC, Python bridge, remote WebSocket host, and Codex CLI are not used in this mode. The universal DLL is managed AnyCPU; exact Quest compatibility still depends on matching BONELAB, LemonLoader, BoneLib, and Fusion versions.
 
 Quest Codex account mode uses a community-built Android port of Codex App Server from the pinned fork commit. This feature is experimental, not an official OpenAI Android distribution. The native server requires a random per-session WebSocket token, keeps account state in BONELAB's private Android files directory, and exposes only BoneAI's dynamic game tools to the model. Browser sign-in is the device-code ceremony; the native App Server continues to run inside BONELAB. Quest still defaults to OpenRouter Free on existing and new installations until you select Codex.
 
@@ -137,14 +136,14 @@ Browser wake-word detection is transcript-gated by the browser, not offline keyw
 
 ## What BoneAI can do
 
-BoneAI exposes exactly 350 structured game tools. The catalog combines the original high-level actions with component-specific world queries, SpawnLab presets, verified interaction invocations, directional physics, combat strengths, player presets, turn presets, and radius scans. Codex receives the full namespaced catalog. Providers with documented tool-count limits receive a prompt-relevant subset plus `tools.search`, so they can discover and call anything in the full catalog without exceeding their API limit. The DLL never treats free-form text as a completed game action.
+BoneAI exposes over 350 structured game tools. The catalog combines high-level actions with component-specific world queries, built-in spawn presets, verified interaction invocations, directional physics, combat strengths, player presets, and radius scans. Codex receives the full namespaced catalog. Providers with documented tool-count limits receive a prompt-relevant subset plus `tools.search`, so they can discover and call anything in the full catalog without exceeding their API limit. The DLL never treats free-form text as a completed game action.
 
 | Area | Capabilities |
 |---|---|
 | Player | Read state, teleport, heal/damage, set health, strength, speed, agility/jump, vitality, and restore runtime overrides |
 | Avatars | Search installed avatar catalogs, inspect catalog status, refresh, and switch by name or barcode |
 | World | Inspect the scene, raycast what you are looking at, find nearby NPCs, weapons, grips, seats, buttons, doors, and other objects |
-| Spawning | Search SpawnLab's base-game and installed-mod catalog, spawn items/NPCs/props/vehicles, refresh the catalog, and despawn |
+| Spawning | Search the game's loaded base-game and installed-mod spawnables, spawn by unique name or barcode, choose a position, check callback status, and despawn; a manual Spawn Catalog page is available in BoneAI Preferences |
 | Interaction | Grab, release, pull to hand, bring objects over, use, activate, press, pull, open, close, push, and throw |
 | Combat | Aim, shoot, reload, damage, punch, kick, hit, attack nearby targets, attack Fusion players, and throw objects at targets |
 | Movement | Move to positions or objects, go to players, follow, stop, turn, and jump |
@@ -153,7 +152,7 @@ BoneAI exposes exactly 350 structured game tools. The catalog combines the origi
 | Fusion | Read session/player state, find and follow players, switch avatars, attack through Fusion's damage sender, and report sync behavior |
 | Diagnostics | List loaded mods/capabilities, read recent MelonLoader errors, and show headset notifications |
 
-Every action has an ID and returns `success`, `failed`, `cancelled`, or `pending`. `pending` means the game accepted a request but BoneAI cannot yet confirm its outcome; it is **not** a completed action. For example, after a SpawnLab request, inspect the nearby world to verify the object exists. A cancelled action is skipped if it has not started; cancellation after execution begins cannot undo a game-side effect.
+Every action has an ID and returns `success`, `failed`, `cancelled`, or `pending`. `pending` means the game accepted a request but BoneAI cannot yet confirm its outcome; it is **not** a completed action. After spawning, use `spawn.status` with the returned action ID to check for a local callback, and inspect the world or a second client if needed. A cancelled action is skipped if it has not started; cancellation after execution begins cannot undo a game-side effect.
 
 ## Avatar discovery
 
@@ -167,7 +166,7 @@ BoneAI uses BONELAB/Fusion paths and checks local ownership before direct mutati
 
 | Action | Multiplayer behavior | BoneAI needed by other players? |
 |---|---|---|
-| Spawn | SpawnLab requests its network spawner online; callback and peer outcome are not synchronously confirmed | No custom BoneAI protocol; peer test required |
+| Spawn | BoneAI uses Fusion's `NetworkAssetSpawner` server route online and checks Fusion's local spawn-gun permission first. `spawn.status` reports a local callback and network entity ID when available, not peer confirmation. Offline it uses BONELAB's `AssetSpawner` callback. | No custom BoneAI protocol; peer test required |
 | Grab/release | Marrow hand/grip path; hand attachment is checked locally | No custom BoneAI protocol; peer test required |
 | Gun fire | Real gun firing path; resulting hit/peer state is not synchronously confirmed | No custom BoneAI protocol; peer test required |
 | Seat enter/exit | Marrow seat path; local seat state is checked | No custom BoneAI protocol; peer test required |
@@ -206,7 +205,7 @@ Install/open Codex, then restart BONELAB. BoneAI searches the system `PATH` and 
 
 ### Spawning fails
 
-Install SpawnLab `1.0.1`, restart BONELAB, and refresh SpawnLab's catalog once. Then ask BoneAI to use `spawn.refresh` or `spawn.list` before spawning. An accepted spawn request returns `pending`; search the world afterward to confirm it appeared.
+Wait until the level and Marrow warehouse have loaded, then use `spawn.refresh` or `spawn.list`. Ask for an exact barcode if a name is ambiguous. An accepted request returns `pending`; call `spawn.status` with its action ID to check local completion. In Fusion, spawning is blocked when the level is not networked or lobby/gamemode spawn permissions deny it, rather than silently creating a local-only object.
 
 ### An object command fails
 
@@ -222,8 +221,8 @@ Ask BoneAI for `fusion.get_sync_report`. Local player stat changes, UI, conversa
 - Navigation is collision-unaware incremental movement, not full navmesh pathfinding.
 - Climbing, crouching, and generalized vehicle steering are not automated.
 - Modded interaction components vary widely; unsupported controls fail cleanly.
-- SpawnLab's spawn call is fire-and-forget, so BoneAI returns `pending` until a later world query can confirm an object appeared. Similar game input requests may be pending when there is no safe outcome callback.
-- The Android native library is reused from the verified v3.0.0 build in v3.0.1; this update changes managed code. Automated tests and compilation do not replace physical Quest and two-client Fusion testing. See [the test checklist](docs/TESTING-v3.0.1.md).
+- Fusion's spawn callback confirms an object on the initiating client, not that every peer loaded or saw it. If no callback arrives within two minutes, BoneAI marks it unconfirmed and releases its callback registration; a slow peer may still finish later. Similar game input requests may be pending when there is no safe outcome callback.
+- The Android native library is reused from the verified v3.0.0 build; v3.1 changes managed code. Automated tests and compilation do not replace physical Quest and two-client Fusion testing. See [the test checklist](docs/TESTING-v3.1.0.md).
 - The exact supported game stack matters because BONELAB uses generated IL2CPP assemblies.
 
 ## Build from source
@@ -242,4 +241,6 @@ Provider transports follow the official [Codex App Server](https://developers.op
 
 ## License
 
-BoneAI source code is available under the MIT License. BONELAB, BoneLib, LabFusion, SpawnLab, and Codex are separate projects and are not redistributed here.
+BoneAI source code is available under the MIT License. BONELAB, BoneLib, LabFusion, SpawnLab, and Codex are separate projects and are not redistributed here. BoneAI's new spawn implementation is its own code; the third-party SpawnLab DLL and decompiled source are not included.
+
+The built-in spawner was prompted by [SpawnLab by ChappieStudios](https://thunderstore.io/c/bonelab/p/ChappieStudios/SpawnLab/). SpawnLab remains an independent project and may still be installed for its own menu; BoneAI no longer calls or requires it.
