@@ -18,7 +18,7 @@ foreach ($required in @('LICENSE', 'NOTICE', 'THIRD_PARTY_LICENSES.md')) {
     }
 }
 
-$target = Join-Path $OutputDirectory "BoneAI-v$Version-Quest"
+$target = Join-Path $OutputDirectory "BoneAI-v$Version"
 $mods = Join-Path $target 'Mods'
 $userLibs = Join-Path $target 'UserLibs'
 if (Test-Path -LiteralPath $target) { throw "Package directory already exists: $target" }
@@ -41,7 +41,7 @@ foreach ($name in @('NOTICE', 'THIRD_PARTY_LICENSES.txt', 'THIRD_PARTY_LICENSES.
     }
 }
 
-$zip = Join-Path $OutputDirectory "BoneAI-v$Version-Quest.zip"
+$zip = Join-Path $OutputDirectory "BoneAI-v$Version.zip"
 if (Test-Path -LiteralPath $zip) { throw "Package archive already exists: $zip" }
 Compress-Archive -Path (Join-Path $target '*') -DestinationPath $zip -CompressionLevel Optimal
 Get-FileHash -LiteralPath $zip -Algorithm SHA256 | ForEach-Object {

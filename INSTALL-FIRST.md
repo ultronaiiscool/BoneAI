@@ -1,13 +1,13 @@
-# Install BoneAI v3
+# Install BoneAI v3.3 — one ZIP for PCVR and Quest
 
 1. Install BONELAB, a compatible MelonLoader (PCVR) or LemonLoader (Quest), and BoneLib.
-2. Copy `Mods/BoneAI.dll` from the v3 package into your game's `Mods` directory. It is one universal managed DLL for PCVR and Quest.
+2. Copy `Mods/BoneAI.dll` from the ZIP into your game's `Mods` directory. It is the same managed DLL for PCVR and Quest. On PCVR, do not copy `UserLibs/libcodex_app_server.so`—that file is Android-only.
 3. On Quest, if you want Codex account sign-in, also copy the package's `UserLibs/libcodex_app_server.so` and `.sha256` file into LemonLoader's `UserLibs` directory.
 4. Install Fusion for multiplayer features. BoneAI's built-in spawning works offline without Fusion; online spawns use Fusion's network path. SpawnLab is not required.
 5. Open **Preferences → BoneAI → AI Provider**. Choose **Codex account sign-in** or **Free OpenRouter**.
 6. For Codex, use **Codex Account → Sign In With Codex** and finish the one-time browser code. On PCVR, install the Codex CLI/App Server first. On Quest, the bundled native library runs inside BONELAB.
 7. For OpenRouter Free, enter your own OpenRouter key under **API Key (saved securely)** and reconnect.
 8. Use **Assistant · Home** to send a prompt. The prompt field clears when sent.
-9. Optionally open **Codex Account → Choose Codex Model → Refresh available models** to select a model offered by your account. **Voice · Beta** has Automatic, On-Device, browser-service, and typed-command paths; on-device speech works only if your browser supports it.
+9. Optionally open **Codex Account → Choose Codex Model → Refresh available models** to select a model offered by your account. **Voice · Beta** has on-device, browser-service, Groq, Cloudflare, and typed-command paths. The last two require your own free-tier credentials.
 
 No Python bridge or autoupdater is included. The Android native library is a community build; Quest Codex account mode still needs physical headset validation. See `README.md` and `QUEST-README.md` for setup, limitations, and troubleshooting.

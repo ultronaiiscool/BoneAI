@@ -16,7 +16,7 @@ Ask normal questions or give commands such as:
 
 > Change me to my Morty avatar and make me stronger.
 
-BoneAI v3 uses one managed `BoneAI.dll` for Windows PCVR and standalone Quest/LemonLoader. Quest Codex account mode also includes an Android ARM64 native App Server library from the [BoneAI build branch of the Codex fork](https://github.com/ultronaiiscool/codex-termux/tree/quest/boneai-v3-secure). The library runs inside BONELAB, so no PC or Python bridge is needed while playing. Quest can still use OpenRouter Free or another supported API provider without the native library.
+BoneAI v3.3 ships as **one ZIP for both PCVR and standalone Quest/LemonLoader**. It uses the same managed `BoneAI.dll` on both. Quest Codex account mode additionally uses the included Android ARM64 native App Server library from the [BoneAI build branch of the Codex fork](https://github.com/ultronaiiscool/codex-termux/tree/quest/boneai-v3-secure). PCVR users leave that Android file unused. The library runs inside BONELAB, so no PC or Python bridge is needed while playing on Quest. Quest can still use OpenRouter Free or another supported API provider without the native library.
 
 For native source provenance and the security boundary, see [native/README.md](native/README.md). The pinned Rust workspace and Android build inputs are included in `native/codex-android-source-v3.zip`, so Quest source is available directly from BoneAI as well as its fork. Release builders can package a successful native CI artifact with the compiled DLL using [scripts/package-v3.ps1](scripts/package-v3.ps1).
 
@@ -32,7 +32,7 @@ For native source provenance and the security boundary, see [native/README.md](n
 - LabFusion `1.14.2` for multiplayer features (optional for offline play)
 - No SpawnLab installation is needed. BoneAI reads the game's live Marrow spawnable warehouse and uses BONELAB spawning offline or Fusion's network spawner online.
 
-The v3.1 Quest bundle includes BoneAI's DLL and the Android native App Server library. BoneLib, Fusion, and BONELAB belong to their respective authors and must be installed separately. SpawnLab is neither bundled nor required.
+The unified v3.3 ZIP includes BoneAI's DLL and the Android native App Server library. BoneLib, Fusion, and BONELAB belong to their respective authors and must be installed separately. SpawnLab is neither bundled nor required.
 
 ### Install BoneAI
 

@@ -6,4 +6,4 @@ Automatic recognition now attempts browser on-device speech first, then the brow
 
 Groq and Cloudflare offer limited free allocations, not unlimited service. Third-party availability, browser microphone support, and Quest background-browser behavior vary. This release was compiled and source-tested; it has not been verified in a live PCVR or Quest session. The Android native Codex library is unchanged, and no autoupdater is included.
 
-Install `Mods/BoneAI.dll` for PCVR. Standalone Quest additionally needs `UserLibs/libcodex_app_server.so` from the Quest bundle for Codex account sign-in. BoneLib is required; Fusion is optional. Restart BONELAB after replacing the DLL.
+One ZIP serves both platforms. On PCVR, install `Mods/BoneAI.dll`; the Android `UserLibs` file is not used. On standalone Quest, install the same DLL and also `UserLibs/libcodex_app_server.so` plus its checksum file for Codex account sign-in. BoneLib is required; Fusion is optional. Restart BONELAB after replacing the DLL.
