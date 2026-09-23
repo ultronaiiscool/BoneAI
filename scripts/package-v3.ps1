@@ -27,7 +27,7 @@ Copy-Item -LiteralPath $dll -Destination (Join-Path $mods 'BoneAI.dll')
 Copy-Item -LiteralPath $native -Destination (Join-Path $userLibs 'libcodex_app_server.so')
 $hash = (Get-FileHash -LiteralPath (Join-Path $userLibs 'libcodex_app_server.so') -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $userLibs 'libcodex_app_server.so.sha256'), "$hash  libcodex_app_server.so`n")
-foreach ($name in @('README.md', 'QUEST-README.md', 'INSTALL-FIRST.md', 'CHANGELOG.md', 'LICENSE', 'manifest.json', 'icon.png')) {
+foreach ($name in @('README.md', 'QUEST-README.md', 'INSTALL-FIRST.md', 'CHANGELOG.md', 'RELEASE-v3.md', 'LICENSE', 'manifest.json', 'icon.png')) {
     Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $target $name)
 }
 Copy-Item -LiteralPath (Join-Path $repo 'native/README.md') -Destination (Join-Path $target 'NATIVE-SOURCE.md')
