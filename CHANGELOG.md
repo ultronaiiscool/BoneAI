@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2.0 — Model choice, voice fallback, and smoother game actions
+
+- Added an in-game Codex model browser backed by the App Server's paginated `model/list` response, including optional older/hidden entries. A selected model and its supported default effort are saved; an explicit Codex-default option clears the override.
+- Browser voice now defaults to automatic on-device-first recognition when supported, with browser-service and typed-command fallbacks. Added a direct **Open On-Device Voice** control. An offline STT engine is not bundled; on-device availability depends on the browser.
+- Limited queued main-thread work per frame, reduced automatic nearby-world context, reused a bounded physics-overlap buffer, and avoided child-component scans for routine object descriptions. The live spawn catalog now refreshes in small batches instead of rescanning the entire warehouse during an action. Slow tools now log their execution time.
+- Moved avatar manifest refresh and WAV encoding off the game thread, bounded recent-log reads, and throttled repeated movement teleports. Jump targets the verified `PhysicsRig.rbFeet` body instead of every rig rigidbody. Rapid gun calls and extreme physics/avatar values are bounded.
+- Added model-catalog, dispatcher-budget, and browser-voice fallback tests. No autoupdater.
+
 ## 3.1.1 — Browser voice recovery
 
 - Stopped the browser voice page from endlessly restarting after a fatal speech-service network error. It now reports the browser-side failure and lets the player retry deliberately.

@@ -14,7 +14,7 @@ new vm.Script(source);
 const elements = new Map();
 function element(id) {
   if (!elements.has(id)) elements.set(id, {
-    value: id === 'mode' ? 'local' : '', textContent: '', disabled: false,
+    value: id === 'mode' ? 'auto' : '', textContent: '', disabled: false,
     listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; },
     querySelector() { return { disabled: false }; }
   });
@@ -60,5 +60,28 @@ vm.runInContext(source, context);
   assert.equal(requests.length, 1, 'manual fallback did not submit');
   assert.equal(JSON.parse(requests[0].options.body).text, 'spawn a Ford');
   assert.equal(element('manual').value, '', 'manual field was not cleared');
+
+  const fallbackElements = new Map();
+  function fallbackElement(id) {
+    if (!fallbackElements.has(id)) fallbackElements.set(id, {
+      value: id === 'mode' ? 'auto' : '', textContent: '', disabled: false,
+      listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; },
+      querySelector() { return { disabled: false }; }
+    });
+    return fallbackElements.get(id);
+  }
+  class LocalUnavailable extends SpeechRecognition {
+    static async available() { return 'unavailable'; }
+  }
+  const fallbackContext = vm.createContext({
+    window: { SpeechRecognition: LocalUnavailable }, document: { getElementById: fallbackElement },
+    setTimeout, clearTimeout, fetch: async () => ({ status: 202 }), Date, console
+  });
+  vm.runInContext(source, fallbackContext);
+  await fallbackElement('start').listeners.click();
+  assert.notEqual(LocalUnavailable.last.processLocally, true, 'automatic fallback did not use browser service');
+  assert.equal(fallbackElement('start').textContent, 'Stop listening');
+  LocalUnavailable.last.onerror({ error: 'network' });
+  assert.equal(fallbackElement('start').textContent, 'Start listening');
   console.log('Browser voice page behavior tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -5,6 +5,7 @@ namespace BoneAI.Infrastructure;
 public sealed class MainThreadDispatcher
 {
     private readonly ConcurrentQueue<Action> _queue = new();
+    public int PendingCount => _queue.Count;
 
     public Task<T> InvokeAsync<T>(Func<T> function, CancellationToken cancellationToken = default)
     {
@@ -32,8 +33,14 @@ public sealed class MainThreadDispatcher
         return completion.Task;
     }
 
-    public void Drain(int maximum = 24)
+    public void Drain(int maximum = 4, double budgetMilliseconds = 2)
     {
-        for (var i = 0; i < maximum && _queue.TryDequeue(out var action); i++) action();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (var i = 0; i < maximum && _queue.TryDequeue(out var action); i++)
+        {
+            action();
+            if ((System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d /
+                System.Diagnostics.Stopwatch.Frequency >= budgetMilliseconds) break;
+        }
     }
 }

@@ -20,6 +20,8 @@ public sealed class AgentConfig
     public MelonPreferences_Entry<bool> AutoStartCodexHost { get; }
     public MelonPreferences_Entry<string> Provider { get; }
     public MelonPreferences_Entry<string> ProviderModel { get; }
+    public MelonPreferences_Entry<string> CodexModel { get; }
+    public MelonPreferences_Entry<string> CodexEffort { get; }
     public MelonPreferences_Entry<string> ProviderBaseUrl { get; }
     public MelonPreferences_Entry<string> ProviderConversationId { get; }
     public MelonPreferences_Entry<bool> VoiceBetaEnabled { get; }
@@ -50,6 +52,8 @@ public sealed class AgentConfig
         AutoStartCodexHost = category.CreateEntry("AutoStartCodexHost", true);
         Provider = category.CreateEntry("Provider", PlatformInfo.IsAndroid ? "OpenRouter Free" : "Codex");
         ProviderModel = category.CreateEntry("ProviderModel", PlatformInfo.IsAndroid ? "openrouter/free" : string.Empty);
+        CodexModel = category.CreateEntry("CodexModel", string.Empty);
+        CodexEffort = category.CreateEntry("CodexEffort", string.Empty);
         ProviderBaseUrl = category.CreateEntry("ProviderBaseUrl", string.Empty);
         ProviderConversationId = category.CreateEntry("ProviderConversationId", string.Empty);
         VoiceBetaEnabled = category.CreateEntry("VoiceBetaEnabled", false);

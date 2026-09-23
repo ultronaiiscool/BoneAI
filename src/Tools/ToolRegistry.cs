@@ -40,8 +40,15 @@ public sealed class ToolRegistry
             {
                 record.State = AgentActionState.Executing;
                 ActionChanged?.Invoke(call.Name);
-                AgentLog.Info($"Tool request {call.Name} ({call.Id})");
-                return handler(call);
+                AgentLog.Debug($"Tool request {call.Name} ({call.Id})");
+                var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                try { return handler(call); }
+                finally
+                {
+                    var elapsed = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d /
+                        System.Diagnostics.Stopwatch.Frequency;
+                    if (elapsed >= 12) AgentLog.Warn($"Slow game tool {call.Name}: {elapsed:F1} ms");
+                }
             }, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)

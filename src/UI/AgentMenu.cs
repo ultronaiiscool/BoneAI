@@ -17,6 +17,7 @@ public sealed class AgentMenu
     private readonly BoneAIMod _mod;
     private Page? _root;
     private Page? _conversations;
+    private Page? _codexModels;
     private StringElement? _prompt;
     private StringElement? _status;
     private StringElement? _activity;
@@ -33,6 +34,9 @@ public sealed class AgentMenu
     private GameObject? _nativeButton;
     private float _nextRefresh;
     private int _conversationCount = -1;
+    private string _modelQueryText = string.Empty;
+    private bool _showHiddenModels;
+    private int _modelPage;
 
     public AgentMenu(BoneAIMod mod) => _mod = mod;
 
@@ -70,10 +74,11 @@ public sealed class AgentMenu
         Bind(voice, "Speak AI Replies", _mod.Config.VoiceSpeakResponses);
         voice.CreateFunction("Listen Once", Color.green, _mod.Voice.ListenOnce);
         voice.CreateFunction("Open Free Browser Voice", Color.cyan, OpenBrowserVoice);
+        voice.CreateFunction("Open On-Device Voice", Color.green, OpenLocalBrowserVoice);
         voice.CreateFunction("Stop Browser Voice", Color.yellow, _mod.BrowserVoice.Stop);
         _voiceStatus = voice.CreateString("Voice Status", Color.gray, "Voice beta off", _ => { });
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
-        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Free Browser Voice uses Edge/Chrome/Quest Browser and needs no STT key. Keep its page open. The original in-game microphone mode still requires an OpenAI key."));
+        voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Browser Voice tries on-device speech first where supported, then the browser service. On-device may need a model download. Typed commands always work. In-game microphone voice requires an OpenAI key."));
 
         var provider = _root.CreatePage("AI Provider", cyan, 9);
         provider.CreateFunction("Codex account sign-in", mint, SelectCodex);
@@ -97,6 +102,8 @@ public sealed class AgentMenu
         codex.CreateFunction("Sign Out", Color.red, () => _ = SignOutCodexAsync());
         codex.CreateFunction("About Saved Login", Color.white, () => Notify("Codex Login", "Codex securely keeps and refreshes your login. It remains signed in after restarts until you choose Sign Out."));
         codex.CreateFunction("Quest Setup", Color.yellow, () => Notify("Quest Codex", "Install the v3 Quest package with its native library in UserLibs. Choose Codex account sign-in, enter the one-time code in the browser, then return to BONELAB."));
+        _codexModels = codex.CreatePage("Choose Codex Model", mint, 8);
+        BuildCodexModels();
 
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
         permissions.CreateFunction("Enable All Game Controls", Color.green, EnableAll);
@@ -172,6 +179,64 @@ public sealed class AgentMenu
         _conversations.CreateFunction("New Conversation", Color.green, () => _ = _mod.Conversation.NewConversationAsync());
         foreach (var saved in items) { var copy = saved; _conversations.CreateFunction(Trim(copy.Title, 38), Color.white, () => _ = _mod.Conversation.OpenConversationAsync(copy)); }
         if (items.Length == 0) _conversations.CreateFunction("No saved conversations yet", Color.gray, () => { });
+    }
+
+    private void BuildCodexModels()
+    {
+        if (_codexModels == null) return;
+        var models = _mod.Conversation.CodexModels
+            .Where(x => _showHiddenModels || !x.Hidden)
+            .Where(x => string.IsNullOrWhiteSpace(_modelQueryText) ||
+                x.DisplayName.Contains(_modelQueryText, StringComparison.OrdinalIgnoreCase) ||
+                x.Id.Contains(_modelQueryText, StringComparison.OrdinalIgnoreCase)).ToArray();
+        _modelPage = Math.Clamp(_modelPage, 0, Math.Max(0, (models.Length - 1) / 8));
+        _codexModels.RemoveAll();
+        var selected = string.IsNullOrWhiteSpace(_mod.Config.CodexModel.Value) ? "Codex default" : _mod.Config.CodexModel.Value;
+        _codexModels.CreateString("Selected", Color.white, selected, _ => { });
+        _codexModels.CreateString("Search", Color.white, _modelQueryText, value => _modelQueryText = value.Trim());
+        _codexModels.CreateFunction("Search models", Color.cyan, () => { _modelPage = 0; BuildCodexModels(); });
+        _codexModels.CreateBool("Include older / hidden", Color.white, _showHiddenModels, value => { _showHiddenModels = value; _modelPage = 0; _ = RefreshCodexModelsAsync(); });
+        _codexModels.CreateFunction("Refresh available models", Color.green, () => _ = RefreshCodexModelsAsync());
+        _codexModels.CreateFunction("Use Codex default", Color.yellow, () =>
+        {
+            _mod.Config.CodexModel.Value = _mod.Config.CodexEffort.Value = string.Empty;
+            Notify("Codex model", "Using the model and effort selected by your Codex account.");
+            BuildCodexModels();
+        });
+        if (models.Length == 0) _codexModels.CreateFunction("No models loaded — choose Refresh", Color.gray, () => { });
+        foreach (var item in models.Skip(_modelPage * 8).Take(8))
+        {
+            var model = item;
+            var label = Trim(model.DisplayName + (model.Hidden ? " · older" : "") + (model.IsDefault ? " · default" : ""), 44);
+            _codexModels.CreateFunction(label, model.Id == _mod.Config.CodexModel.Value ? Color.green : Color.white, () =>
+            {
+                _mod.Config.CodexModel.Value = model.Id;
+                _mod.Config.CodexEffort.Value = model.DefaultEffort;
+                Notify("Codex model", model.DisplayName + " selected for the next request. Effort: " + (string.IsNullOrEmpty(model.DefaultEffort) ? "account default" : model.DefaultEffort));
+                BuildCodexModels();
+            });
+        }
+        if (_modelPage > 0) _codexModels.CreateFunction("Previous models", Color.cyan, () => { _modelPage--; BuildCodexModels(); });
+        if ((_modelPage + 1) * 8 < models.Length) _codexModels.CreateFunction("Next models", Color.cyan, () => { _modelPage++; BuildCodexModels(); });
+    }
+
+    private async Task RefreshCodexModelsAsync()
+    {
+        try
+        {
+            var models = await _mod.Conversation.ListCodexModelsAsync(_showHiddenModels).ConfigureAwait(false);
+            await _mod.Dispatcher.InvokeAsync(() =>
+            {
+                BuildCodexModels();
+                Notify("Codex models", models.Count + " models returned by your Codex App Server.");
+                return true;
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.AgentLog.Warn("Codex model list: " + ex.GetBaseException().Message);
+            await _mod.Dispatcher.InvokeAsync(() => { Notify("Codex models", "Could not load: " + Trim(ex.GetBaseException().Message, 180)); return true; }).ConfigureAwait(false);
+        }
     }
 
     private void SendPrompt() { var value = _prompt?.Value ?? string.Empty; if (string.IsNullOrWhiteSpace(value)) return; if (_prompt != null) _prompt.Value = string.Empty; _ = _mod.Conversation.SendAsync(value); }
@@ -308,6 +373,17 @@ public sealed class AgentMenu
             Notify("Browser Voice", "Voice page opened and its private local URL was copied. Press Start there and keep the page open.");
         }
         catch (Exception ex) { Infrastructure.AgentLog.Exception("Browser voice start", ex); Notify("Browser Voice Failed", ex.GetBaseException().Message); }
+    }
+    private void OpenLocalBrowserVoice()
+    {
+        try
+        {
+            var url = _mod.BrowserVoice.Start() + "#local";
+            GUIUtility.systemCopyBuffer = url;
+            Application.OpenURL(url);
+            Notify("On-Device Voice", "Opened the local speech option. Your browser must support it and may need a one-time model download.");
+        }
+        catch (Exception ex) { Infrastructure.AgentLog.Exception("local browser voice start", ex); Notify("On-Device Voice Failed", ex.GetBaseException().Message); }
     }
     private void CycleProvider() { var names = AI.ProviderCatalog.Names; var at = Array.FindIndex(names, x => x.Equals(_mod.Config.Provider.Value, StringComparison.OrdinalIgnoreCase)); var next = names[(at + 1 + names.Length) % names.Length]; _mod.Config.Provider.Value = next; _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel(next); _mod.Config.ProviderBaseUrl.Value = string.Empty; Notify("BoneAI provider", next); _ = _mod.Conversation.ConnectAsync(); }
     private static void Notify(string title, string message) => Notifier.Send(new Notification { Title = title, Message = message, ShowTitleOnPopup = true, PopupLength = 7, Type = NotificationType.Information });

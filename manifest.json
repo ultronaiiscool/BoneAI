@@ -1,8 +1,8 @@
 {
   "name": "BoneAI",
-  "version_number": "3.1.1",
+  "version_number": "3.2.0",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
-  "description": "BoneAI v3.1: built-in spawn catalog and Fusion-aware spawning, Quest Codex sign-in, voice beta, and game tools.",
+  "description": "BoneAI v3.2: Codex model browser, voice fallbacks, bounded gameplay work, Fusion-aware spawning, and game tools.",
   "dependencies": [
     "LavaGang-MelonLoader-0.7.3",
     "bonelib-BoneLib-3.2.2",

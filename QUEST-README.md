@@ -20,6 +20,8 @@ Open **AI Provider → Free OpenRouter**, enter your own OpenRouter key in **API
 
 ## Voice beta
 
-**Voice · Beta → Open Free Browser Voice** opens a localhost page that waits for your wake word and sends the following command to BoneAI. If Quest Browser exposes on-device speech recognition, select **On-device** (a language download may be needed). Otherwise, its browser speech service may require internet and can report a network error. The page now stops on that error and lets you type a command instead. Browser support and background behavior depend on Quest Browser; BoneAI has no speech quota. Keep the browser page open.
+**Voice · Beta → Open Free Browser Voice** opens a localhost page that waits for your wake word and sends the following command to BoneAI. **Automatic** tries on-device recognition first if Quest Browser exposes it, then its browser speech service; **Open On-Device Voice** requests local-only mode. A one-time model download may be needed. On-device recognition is not bundled in the DLL and may be unavailable in Quest Browser. A network error stops listening and leaves the typed-command fallback available. Browser support and background behavior depend on Quest Browser; BoneAI has no speech quota. Keep the browser page open.
+
+After Codex sign-in, **Codex Account → Choose Codex Model** reads the actual models available from the bundled App Server. Hidden/older entries are optional; the available list depends on the server and account. Model choice persists in BoneAI preferences.
 
 There is no autoupdater. Quest Codex account mode is experimental until it has been tested on physical hardware.

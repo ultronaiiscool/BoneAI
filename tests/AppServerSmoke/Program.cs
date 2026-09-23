@@ -12,9 +12,19 @@ try
     await Task.Delay(1200);
     using var socket = new ClientWebSocket();
     await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
-    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "3.1.1" }, capabilities = new { experimentalApi = true } });
-    Console.WriteLine(await Response(1));
+    await Send(1, "initialize", new { clientInfo = new { name = "boneai-smoke", title = "BoneAI Smoke Test", version = "3.2.0" }, capabilities = new { experimentalApi = true } });
+    var initialized = await Response(1);
     await Raw(new { method = "initialized", @params = new { } });
+    if (args.Length > 1 && args[1] == "--models-only")
+    {
+        await Send(98, "model/list", new { limit = 100, includeHidden = true });
+        using var catalog = JsonDocument.Parse(await Response(98));
+        if (catalog.RootElement.TryGetProperty("error", out var error)) throw new Exception("model/list failed: " + error.ToString());
+        var data = catalog.RootElement.GetProperty("result").GetProperty("data");
+        Console.WriteLine("Live Codex model/list returned " + data.GetArrayLength() + " entries.");
+        return;
+    }
+    Console.WriteLine(initialized);
     await Send(99, "account/read", new { });
     var account = await Response(99);
     Console.WriteLine(account);

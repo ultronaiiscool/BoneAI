@@ -22,6 +22,9 @@ public sealed class BoneAIMod : MelonMod
     public QuestCodexHostManager QuestCodexHost { get; private set; } = null!;
     public VoiceAssistant Voice { get; private set; } = null!;
     public BrowserVoiceServer BrowserVoice { get; private set; } = null!;
+    private DateTime _nextGameErrorLogUtc;
+    private DateTime _nextVoiceErrorLogUtc;
+    private DateTime _nextMenuErrorLogUtc;
 
     public override void OnInitializeMelon()
     {
@@ -29,7 +32,7 @@ public sealed class BoneAIMod : MelonMod
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
         RuntimeSecrets.Initialize();
-        AgentLog.Info("Starting BoneAI 3.1.1 on " + PlatformInfo.DisplayName);
+        AgentLog.Info("Starting BoneAI 3.2.0 on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -51,9 +54,20 @@ public sealed class BoneAIMod : MelonMod
     public override void OnUpdate()
     {
         Dispatcher.Drain();
-        Game.Update();
-        Voice.Update();
-        Menu.Refresh();
+        try { Game.Update(); }
+        catch (Exception ex) { WarnThrottled("game update", ex, ref _nextGameErrorLogUtc); }
+        try { Voice.Update(); }
+        catch (Exception ex) { WarnThrottled("voice update", ex, ref _nextVoiceErrorLogUtc); }
+        try { Menu.Refresh(); }
+        catch (Exception ex) { WarnThrottled("menu refresh", ex, ref _nextMenuErrorLogUtc); }
+    }
+
+    private static void WarnThrottled(string area, Exception ex, ref DateTime nextUtc)
+    {
+        var now = DateTime.UtcNow;
+        if (now < nextUtc) return;
+        nextUtc = now.AddSeconds(10);
+        AgentLog.Warn(area + " failed; further repeats are muted for 10 seconds: " + ex.GetBaseException().Message);
     }
 
     public override void OnDeinitializeMelon()

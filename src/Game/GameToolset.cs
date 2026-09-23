@@ -37,8 +37,14 @@ public sealed class GameToolset
     private string? _followObject;
     private float _moveSpeed = 2.5f;
     private bool _avatarCatalogLogged;
+    private IReadOnlyList<AvatarEntry> _cachedAvatars = Array.Empty<AvatarEntry>();
+    private float _avatarCacheExpiresAt;
+    private DateTime _avatarProviderRefreshUtc;
+    private Task<IReadOnlyList<AvatarCatalogItem>>? _avatarRefreshTask;
     private readonly Dictionary<int, ComponentSnapshot> _componentCache = new();
+    private readonly Dictionary<int, ComponentSnapshot> _deepComponentCache = new();
     private readonly Dictionary<int, SemanticSnapshot> _semanticCache = new();
+    private readonly Collider[] _overlapBuffer = new Collider[1024];
     private List<GameObject> _nearbyCache = new();
     private Vector3 _nearbyCenter;
     private float _nearbyRadius;
@@ -48,7 +54,10 @@ public sealed class GameToolset
     private long _worldCacheHits;
     private double _worldScanMilliseconds;
     private float _nextObjectPrune;
+    private float _nextComponentPrune;
     private float _nextSpawnSweep;
+    private float _nextMovementStep;
+    private long _truncatedWorldScans;
 
     public GameToolset(AgentConfig config, FusionBridge fusion)
     {
@@ -303,7 +312,7 @@ public sealed class GameToolset
         permissions = new { actions = _config.AllowActions.Value, playerModification = _config.AllowPlayerModification.Value, spawning = _config.AllowSpawning.Value, combat = _config.AllowCombat.Value, fusionSynchronization = _config.FusionSynchronization.Value },
         fusion = _fusion.GetSession(),
         fusionPlayers = FusionPlayerData(),
-        nearby = CompactNearby(10f, 20),
+        nearby = CompactNearby(8f, 10),
         recentScene = SceneManager.GetActiveScene().name
     };
     private object SafeState() { try { return PlayerStateData(); } catch (Exception ex) { return new { available=false, error=ex.Message }; } }
@@ -328,12 +337,19 @@ public sealed class GameToolset
     private ToolResult AvatarCatalogStatus(ToolCall c)
     {
         var entries = AvatarCatalog().ToArray();
-        return ToolResult.Success(c, new { count = entries.Length, lastRefreshUtc = _avatarCatalog.LastRefreshUtc, providers = entries.GroupBy(x => x.provider).ToDictionary(x => x.Key, x => x.Count()) });
+        return ToolResult.Success(c, new { count = entries.Length, refreshing = _avatarRefreshTask is { IsCompleted: false }, lastRefreshUtc = _avatarCatalog.LastRefreshUtc, providers = entries.GroupBy(x => x.provider).ToDictionary(x => x.Key, x => x.Count()) });
     }
     private ToolResult RefreshAvatars(ToolCall c)
     {
-        var entries = _avatarCatalog.Refresh();
-        return ToolResult.Success(c, new { count = entries.Count, refreshed = true });
+        if (_avatarRefreshTask is { IsCompleted: false })
+            return ToolResult.Pending(c, new { refreshing = true }, "Avatar catalog refresh is already running in the background.");
+        _avatarRefreshTask = _avatarCatalog.RefreshAsync();
+        _ = _avatarRefreshTask.ContinueWith(task =>
+        {
+            if (task.IsFaulted) AgentLog.Exception("avatar catalog refresh", task.Exception!.GetBaseException());
+            else AgentLog.Info($"Avatar catalog refreshed in background: {task.Result.Count} avatars.");
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return ToolResult.Pending(c, new { refreshing = true }, "Avatar manifest scan started in the background. Call avatar.catalog_status after it completes.");
     }
     private ToolResult SetAvatar(ToolCall c)
     {
@@ -353,8 +369,17 @@ public sealed class GameToolset
     private ToolResult SetPhysics(ToolCall c)
     {
         var a=Player.Avatar ?? throw new InvalidOperationException("No active avatar.");
-        foreach(var map in new[]{("upperStrength","strengthUpper"),("lowerStrength","strengthLower"),("gripStrength","strengthGrip"),("speed","speed"),("agility","agility"),("vitality","vitality")})
-            if(c.Arguments[map.Item1]!=null){ _avatarDefaults.TryAdd(map.Item2,Convert.ToSingle(ReadMember(a,map.Item2))); SetMember(a,map.Item2,c.Arguments[map.Item1]!.Value<float>()); }
+        var maps = new[]{("upperStrength","strengthUpper"),("lowerStrength","strengthLower"),("gripStrength","strengthGrip"),("speed","speed"),("agility","agility"),("vitality","vitality")};
+        var changes = maps.Where(map => c.Arguments[map.Item1] != null)
+            .Select(map => (map.Item1, map.Item2, Value: c.Arguments[map.Item1]!.Value<float>())).ToArray();
+        foreach (var change in changes)
+            if (!float.IsFinite(change.Value) || change.Value < 0.1f || change.Value > 20f)
+                throw new ArgumentException(change.Item1 + " must be between 0.1 and 20.");
+        foreach (var change in changes)
+        {
+            _avatarDefaults.TryAdd(change.Item2, Convert.ToSingle(ReadMember(a, change.Item2)));
+            SetMember(a, change.Item2, change.Value);
+        }
         return ToolResult.Success(c,new{modified=true});
     }
     private ToolResult SetStrength(ToolCall c)
@@ -445,6 +470,7 @@ public sealed class GameToolset
 
     private IEnumerable<AvatarEntry> AvatarCatalog()
     {
+        if (Time.unscaledTime < _avatarCacheExpiresAt && _avatarProviderRefreshUtc == _avatarCatalog.LastRefreshUtc) return _cachedAvatars;
         var found = new Dictionary<string, AvatarEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in _avatarCatalog.Items)
             found[item.Barcode] = new AvatarEntry(item.Title, item.Barcode, item.Source, item.Provider);
@@ -459,7 +485,10 @@ public sealed class GameToolset
                 found[barcode] = new AvatarEntry(avatar.Title ?? barcode, barcode, avatar.Pallet?.Title ?? string.Empty, "Marrow warehouse");
             }
         }
-        return found.Values;
+        _cachedAvatars = found.Values.ToArray();
+        _avatarProviderRefreshUtc = _avatarCatalog.LastRefreshUtc;
+        _avatarCacheExpiresAt = Time.unscaledTime + 20f;
+        return _cachedAvatars;
     }
 
     private async Task RefreshAvatarCatalogAsync()
@@ -475,10 +504,13 @@ public sealed class GameToolset
     private ToolResult SearchSpawnables(ToolCall c)
     {
         var query=c.Arguments["query"]?.Value<string>()??string.Empty; var limit=Math.Clamp(c.Arguments["limit"]?.Value<int>()??20,1,100);
-        return ToolResult.Success(c,SpawnCatalog().OrderBy(x=>Score(x.Title,query)).Take(limit)
+        var catalog = SpawnCatalog();
+        if (_spawns.IsRefreshing && _spawns.EntryCount == 0) return ToolResult.Pending(c, new { catalogLoading = true }, "Spawn catalog is loading in small batches. Retry shortly.");
+        if (catalog.Count == 0 && AssetWarehouse.Instance?.InitialLoaded != true) return ToolResult.Failure(c, "Marrow warehouse is not loaded yet.");
+        return ToolResult.Success(c,catalog.OrderBy(x=>Score(x.Title,query)).Take(limit)
             .Select(x=>new{title=x.Title,barcode=x.Barcode,source=x.Source,category=x.Category,loaded=true}).ToArray());
     }
-    private ToolResult RefreshSpawns(ToolCall c)=>ToolResult.Success(c,new{provider="Marrow warehouse",count=_spawns.Refresh()});
+    private ToolResult RefreshSpawns(ToolCall c){var previous=_spawns.Refresh();if(!_spawns.IsRefreshing)return ToolResult.Failure(c,"Marrow warehouse is not loaded; try again after the level finishes loading.");return ToolResult.Pending(c,new{provider="Marrow warehouse",previousCount=previous,refreshing=true},"Spawn catalog refresh started in per-frame batches. Call spawn.list shortly.");}
     private ToolResult SpawnStatus(ToolCall c)
     {
         var actionId=Str(c,"actionId");
@@ -543,15 +575,15 @@ public sealed class GameToolset
         foreach(var component in go.GetComponentsInChildren<Component>()) foreach(var name in names){var m=component.GetType().GetMethod(name,BindingFlags.Instance|BindingFlags.Public,null,Type.EmptyTypes,null); if(m!=null){m.Invoke(component,null); return ToolResult.Pending(c,new{component=component.GetType().Name,method=name},"Interaction method was invoked; resulting object state is not confirmed.");}}
         return ToolResult.Failure(c,"No supported public interaction method was exposed by this object.");
     }
-    private ToolResult ApplyForce(ToolCall c)=>RigidAction(c,rb=>rb.AddForce(Vec(c.Arguments["force"]),ForceMode.Force));
-    private ToolResult ApplyImpulse(ToolCall c)=>RigidAction(c,rb=>rb.AddForce(Vec(c.Arguments["force"]),ForceMode.Impulse));
-    private ToolResult SetVelocity(ToolCall c)=>RigidAction(c,rb=>rb.velocity=Vec(c.Arguments["velocity"]));
+    private ToolResult ApplyForce(ToolCall c)=>RigidAction(c,rb=>rb.AddForce(BoundedVector(c.Arguments["force"],100f),ForceMode.Force));
+    private ToolResult ApplyImpulse(ToolCall c)=>RigidAction(c,rb=>rb.AddForce(BoundedVector(c.Arguments["force"],100f),ForceMode.Impulse));
+    private ToolResult SetVelocity(ToolCall c)=>RigidAction(c,rb=>rb.velocity=BoundedVector(c.Arguments["velocity"],50f));
     private ToolResult MoveObject(ToolCall c)=>RigidAction(c,rb=>rb.MovePosition(Vec(c.Arguments["position"])));
     private ToolResult RotateObject(ToolCall c)=>RigidAction(c,rb=>rb.MoveRotation(Quaternion.Euler(Vec(c.Arguments["rotation"]))));
     private ToolResult RigidAction(ToolCall c,Action<Rigidbody> action){var go=NeedObject(c);var rb=go.GetComponentInChildren<Rigidbody>()??throw new InvalidOperationException("Object has no Rigidbody.");var sync=RequireOwnedNetworkObject(go);action(rb);return ToolResult.Pending(c,new{objectId=Str(c,"objectId"),synchronization=sync},"Physics command was issued; its next-step transform and peer replication are not yet confirmed.");}
 
     private ToolResult Aim(ToolCall c){var target=NeedObject(c); var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); held.transform.rotation=Quaternion.LookRotation(target.transform.position-held.transform.position,Vector3.up); return ToolResult.Success(c);}
-    private ToolResult Shoot(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var fire=gun.GetType().GetMethod("Fire",Type.EmptyTypes)??throw new MissingMethodException("Gun.Fire"); var attempts=Math.Clamp(c.Arguments["shots"]?.Value<int>()??1,1,20); for(var i=0;i<attempts;i++)fire.Invoke(gun,null); return ToolResult.Pending(c,new{attemptedShots=attempts},"Gun.Fire was invoked; ammunition, projectile, hit, and peer delivery were not confirmed.");}
+    private ToolResult Shoot(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var fire=gun.GetType().GetMethod("Fire",Type.EmptyTypes)??throw new MissingMethodException("Gun.Fire"); var requested=c.Arguments["shots"]?.Value<int>()??1;var attempts=Math.Clamp(requested,1,3); for(var i=0;i<attempts;i++)fire.Invoke(gun,null); return ToolResult.Pending(c,new{requestedShots=requested,attemptedShots=attempts,capped=requested>3},"Gun.Fire was invoked at most three times in this frame; ammunition, projectile, hit, and peer delivery were not confirmed.");}
     private ToolResult Reload(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var m=gun.GetType().GetMethod("InstantLoadAsync",Type.EmptyTypes)??throw new MissingMethodException("Gun.InstantLoadAsync"); m.Invoke(gun,null); return ToolResult.Pending(c,new{requested=true},"Async reload was requested; completion and ammunition were not confirmed.");}
     private ToolResult DamageTarget(ToolCall c)
     {
@@ -590,9 +622,10 @@ public sealed class GameToolset
             if (held == null || gun == null) continue;
             held.transform.rotation = Quaternion.LookRotation(target.transform.position - held.transform.position, Vector3.up);
             var fire = gun.GetType().GetMethod("Fire", Type.EmptyTypes) ?? throw new MissingMethodException("Gun.Fire");
-            var shots = Math.Clamp(c.Arguments["shots"]?.Value<int>() ?? 1, 1, 20);
+            var requestedShots = c.Arguments["shots"]?.Value<int>() ?? 1;
+            var shots = Math.Clamp(requestedShots, 1, 3);
             for (var i = 0; i < shots; i++) fire.Invoke(gun, null);
-            return ToolResult.Pending(c, new { mode = "held gun", hand = handName, attemptedShots=shots }, "Gun.Fire was invoked; hits and peer delivery were not confirmed.");
+            return ToolResult.Pending(c, new { mode = "held gun", hand = handName, requestedShots, attemptedShots=shots, capped=requestedShots>3 }, "Gun.Fire was invoked at most three times in this frame; hits and peer delivery were not confirmed.");
         }
         if (_fusion.TryGetPlayerId(target, out var smallId))
         {
@@ -641,13 +674,13 @@ public sealed class GameToolset
         body.AddForce((target.transform.position - body.position).normalized * force, ForceMode.VelocityChange);
         return ToolResult.Pending(c, new { objectId = Str(c, "objectId"), targetObjectId = targetId, requestedForce = force, synchronization }, "Throw impulse was issued; travel and impact are not confirmed.");
     }
-    private ToolResult MoveTo(ToolCall c){_moveDestination=Vec(c.Arguments["position"]);_followObject=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Pending(c,new{started=true,destination=V(_moveDestination.Value)},"Movement started; destination has not been reached yet.");}
+    private ToolResult MoveTo(ToolCall c){_moveDestination=CheckedDestination(Vec(c.Arguments["position"]));_followObject=null;_moveSpeed=CheckedMoveSpeed(c);return ToolResult.Pending(c,new{started=true,destination=V(_moveDestination.Value)},"Movement started; destination has not been reached yet.");}
     private ToolResult GoToObject(ToolCall c)
     {
         var go = NeedObject(c);
         _moveDestination = go.transform.position;
         _followObject = null;
-        _moveSpeed = c.Arguments["speed"]?.Value<float>() ?? 2.5f;
+        _moveSpeed = CheckedMoveSpeed(c);
         return ToolResult.Pending(c, new { started = true, objectId = Str(c, "objectId"), destination = V(_moveDestination.Value) }, "Movement started; destination has not been reached yet.");
     }
     private ToolResult GoToPlayer(ToolCall c)
@@ -657,7 +690,7 @@ public sealed class GameToolset
         c.Arguments["objectId"] = _objects.Register(player.RigObject);
         return GoToObject(c);
     }
-    private ToolResult Follow(ToolCall c){NeedObject(c);_followObject=Str(c,"objectId");_moveDestination=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Pending(c,new{started=true},"Follow behavior started and remains active until stopped.");}
+    private ToolResult Follow(ToolCall c){NeedObject(c);_followObject=Str(c,"objectId");_moveDestination=null;_moveSpeed=CheckedMoveSpeed(c);return ToolResult.Pending(c,new{started=true},"Follow behavior started and remains active until stopped.");}
     private ToolResult FollowFusionPlayer(ToolCall c)
     {
         var player = ResolveFusionPlayer(c);
@@ -667,7 +700,7 @@ public sealed class GameToolset
     }
     private ToolResult StopMovement(ToolCall c){_moveDestination=null;_followObject=null;return ToolResult.Success(c);}
     private ToolResult Turn(ToolCall c){var rig=NeedRig();var e=rig.transform.eulerAngles;e.y+=Num(c,"degrees");rig.Teleport(rig.transform.position,e,true);return ToolResult.Success(c,new{yaw=e.y});}
-    private ToolResult Jump(ToolCall c){var force=c.Arguments["force"]?.Value<float>()??4.5f;var bodies=NeedRig().GetComponentsInChildren<Rigidbody>();if(bodies.Length==0)return ToolResult.Failure(c,"Physics rig has no rigidbodies.");foreach(var rb in bodies)rb.AddForce(Vector3.up*force,ForceMode.VelocityChange);return ToolResult.Pending(c,new{requestedForce=force,rigidbodies=bodies.Length},"Jump impulse was issued; actual motion is not confirmed.");}
+    private ToolResult Jump(ToolCall c){var force=c.Arguments["force"]?.Value<float>()??4.5f;if(!float.IsFinite(force)||force<0.1f||force>8f)return ToolResult.Failure(c,"Jump force must be between 0.1 and 8.");var rig=NeedRig();if(rig.activeSeat!=null)return ToolResult.Failure(c,"Cannot jump while seated.");var body=rig.physicsRig?.rbFeet;if(body==null)return ToolResult.Failure(c,"Physics rig feet rigidbody is unavailable; jump was not applied.");body.AddForce(Vector3.up*force,ForceMode.VelocityChange);return ToolResult.Pending(c,new{requestedForce=force,rigidbody="PhysicsRig.rbFeet"},"One verified rig rigidbody received an impulse; actual motion is not confirmed.");}
     private ToolResult EnterVehicle(ToolCall c){var go=NeedObject(c);var seat=FindComponentByName(go,"Seat")??throw new InvalidOperationException("No Seat component found.");var m=seat.GetType().GetMethod("IngressRig")??throw new MissingMethodException("Seat.IngressRig");m.Invoke(seat,new object[]{NeedRig()});return NeedRig().activeSeat!=null ? ToolResult.Success(c,new{seated=true,peerReplicationConfirmed=false}) : ToolResult.Pending(c,new{requested=true},"Seat ingress was invoked; seated state is not confirmed yet.");}
     private ToolResult ExitVehicle(ToolCall c){var seat=NeedRig().activeSeat;if(seat==null)return ToolResult.Failure(c,"Player is not seated.");seat.EgressRig(false);return NeedRig().activeSeat==null ? ToolResult.Success(c,new{seated=false,peerReplicationConfirmed=false}) : ToolResult.Pending(c,new{requested=true},"Seat egress was invoked; exit is not confirmed yet.");}
     private ToolResult LoadedMods(ToolCall c)=>ToolResult.Success(c,AppDomain.CurrentDomain.GetAssemblies().Select(a=>new{name=a.GetName().Name,version=a.GetName().Version?.ToString()}).Where(x=>!string.IsNullOrWhiteSpace(x.name)).OrderBy(x=>x.name).ToArray());
@@ -689,7 +722,19 @@ public sealed class GameToolset
             new{name="BoneAI.Catalogs",loaded=true,usable=true,integration="Built into BoneAI.dll; scans WristHub and installed pallet manifests"}
         });
     }
-    private ToolResult RecentErrors(ToolCall c){var path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"MelonLoader","Latest.log");if(!File.Exists(path))return ToolResult.Failure(c,"Latest.log was not found.");var limit=Math.Clamp(c.Arguments["limit"]?.Value<int>()??40,1,200);var lines=File.ReadLines(path).Where(x=>x.Contains("error",StringComparison.OrdinalIgnoreCase)||x.Contains("exception",StringComparison.OrdinalIgnoreCase)).TakeLast(limit).Select(Infrastructure.RuntimeSecrets.Redact).ToArray();return ToolResult.Success(c,lines);}
+    private ToolResult RecentErrors(ToolCall c)
+    {
+        var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MelonLoader", "Latest.log");
+        if (!File.Exists(path)) return ToolResult.Failure(c, "Latest.log was not found.");
+        var limit = Math.Clamp(c.Arguments["limit"]?.Value<int>() ?? 40, 1, 200);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (stream.Length > 256 * 1024) stream.Seek(-256 * 1024, SeekOrigin.End);
+        using var reader = new StreamReader(stream);
+        var lines = reader.ReadToEnd().Split('\n')
+            .Where(x => x.Contains("error", StringComparison.OrdinalIgnoreCase) || x.Contains("exception", StringComparison.OrdinalIgnoreCase))
+            .TakeLast(limit).Select(Infrastructure.RuntimeSecrets.Redact).ToArray();
+        return ToolResult.Success(c, lines);
+    }
     private ToolResult Notify(ToolCall c){Notifier.Send(new Notification{Title="BoneAI",Message=Str(c,"message"),ShowTitleOnPopup=true,Type=NotificationType.Information,PopupLength=4});return ToolResult.Success(c);}
     private ToolResult PerformanceDiagnostics(ToolCall c) => ToolResult.Success(c, new
     {
@@ -697,11 +742,13 @@ public sealed class GameToolset
         cacheHits = _worldCacheHits,
         hitRatePercent = _worldScans + _worldCacheHits == 0 ? 0 : Math.Round(100d * _worldCacheHits / (_worldScans + _worldCacheHits), 1),
         averagePhysicalScanMs = _worldScans == 0 ? 0 : Math.Round(_worldScanMilliseconds / _worldScans, 3),
-        cachedObjects = _componentCache.Count
+        cachedObjects = _componentCache.Count,
+        truncatedWorldScans = _truncatedWorldScans
     });
 
     public void Update()
     {
+        _spawns.TickCatalog();
         if (!_avatarCatalogLogged && AssetWarehouse.Instance?.InitialLoaded == true)
         {
             _avatarCatalogLogged = true;
@@ -709,9 +756,43 @@ public sealed class GameToolset
             catch (Exception ex) { AgentLog.Warn("Avatar catalog validation failed: " + ex.GetBaseException().Message); }
         }
         if (Time.unscaledTime >= _nextObjectPrune) { _objects.Prune(); _nextObjectPrune = Time.unscaledTime + 2f; }
+        if (Time.unscaledTime >= _nextComponentPrune)
+        {
+            PruneComponents(_componentCache);
+            PruneComponents(_deepComponentCache);
+            foreach (var id in _semanticCache.Where(x => x.Value.Object == null || x.Value.ExpiresAt < Time.unscaledTime).Select(x => x.Key).ToArray()) _semanticCache.Remove(id);
+            _nextComponentPrune = Time.unscaledTime + 10f;
+        }
         if (Time.unscaledTime >= _nextSpawnSweep) { _spawns.SweepExpiredRequests(); _nextSpawnSweep = Time.unscaledTime + 5f; }
-        if(_followObject!=null&&_objects.TryGet(_followObject,out var target))_moveDestination=target.transform.position-target.transform.forward*1.5f;
-        if(_moveDestination is not Vector3 destination||Player.RigManager==null)return; var rig=Player.RigManager;var current=rig.transform.position;var flat=new Vector3(destination.x,current.y,destination.z);if(Vector3.Distance(current,flat)<0.15f){if(_followObject==null)_moveDestination=null;return;}var next=Vector3.MoveTowards(current,flat,_moveSpeed*Time.deltaTime);rig.Teleport(next,rig.transform.eulerAngles,true);
+        if (Time.unscaledTime < _nextMovementStep) return;
+        var step = Mathf.Clamp(Time.unscaledTime - (_nextMovementStep - 0.1f), 0.02f, 0.15f);
+        _nextMovementStep = Time.unscaledTime + 0.1f;
+        try
+        {
+            if (_followObject != null)
+            {
+                if (_objects.TryGet(_followObject, out var target)) _moveDestination = target.transform.position - target.transform.forward * 1.5f;
+                else { _followObject = null; _moveDestination = null; }
+            }
+            if (_moveDestination is not Vector3 destination || Player.RigManager == null) return;
+            var rig = Player.RigManager;
+            if (rig.activeSeat != null) return;
+            var current = rig.transform.position;
+            var flat = new Vector3(destination.x, current.y, destination.z);
+            if (Vector3.Distance(current, flat) < 0.15f)
+            {
+                if (_followObject == null) _moveDestination = null;
+                return;
+            }
+            var next = Vector3.MoveTowards(current, flat, _moveSpeed * step);
+            rig.Teleport(next, rig.transform.eulerAngles, true);
+        }
+        catch (Exception ex)
+        {
+            _followObject = null;
+            _moveDestination = null;
+            AgentLog.Warn("Movement stopped after game exception: " + ex.GetBaseException().Message);
+        }
     }
 
     private List<GameObject> NearbyObjects(float radius,int limit)
@@ -728,8 +809,12 @@ public sealed class GameToolset
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var seen = new HashSet<int>();
         var result = new List<GameObject>();
-        foreach (var hit in Physics.OverlapSphere(center, radius))
+        var hitCount = Physics.OverlapSphereNonAlloc(center, radius, _overlapBuffer);
+        if (hitCount == _overlapBuffer.Length) _truncatedWorldScans++;
+        for (var i = 0; i < hitCount; i++)
         {
+            var hit = _overlapBuffer[i];
+            if (hit == null) continue;
             var go = CanonicalObject(hit);
             if (seen.Add(go.GetInstanceID())) result.Add(go);
         }
@@ -761,24 +846,29 @@ public sealed class GameToolset
         _semanticCache[id] = new SemanticSnapshot(go, value, Time.unscaledTime + 1f);
         return value;
     }
-    private ComponentSnapshot Components(GameObject go)
+    private ComponentSnapshot Components(GameObject go, bool includeChildren = false)
     {
         EnsureSceneCache();
         var id = go.GetInstanceID();
-        if (_componentCache.TryGetValue(id, out var cached) && cached.Object == go && Time.unscaledTime < cached.ExpiresAt) return cached;
-        var components = go.GetComponentsInChildren<Component>();
+        var cache = includeChildren ? _deepComponentCache : _componentCache;
+        if (cache.TryGetValue(id, out var cached) && cached.Object == go && Time.unscaledTime < cached.ExpiresAt) return cached;
+        var components = includeChildren ? go.GetComponentsInChildren<Component>() : go.GetComponents<Component>();
         var names = components.Where(x => x != null).Select(x => x.GetType().Name).Distinct().ToArray();
         var snapshot = new ComponentSnapshot(go, components, names, names.Any(NpcTypes.Contains), names.Any(InteractableTypes.Contains), Time.unscaledTime + 1f);
-        _componentCache[id] = snapshot;
+        cache[id] = snapshot;
         return snapshot;
     }
     private bool IsNpc(GameObject go) => Components(go).IsNpc;
     private bool IsInteractable(GameObject go) => Components(go).IsInteractable;
+    private static void PruneComponents(Dictionary<int, ComponentSnapshot> cache)
+    {
+        foreach (var id in cache.Where(x => x.Value.Object == null || x.Value.ExpiresAt < Time.unscaledTime).Select(x => x.Key).ToArray()) cache.Remove(id);
+    }
     private void EnsureSceneCache()
     {
         var scene = SceneManager.GetActiveScene().buildIndex;
         if (scene == _cachedScene) return;
-        _cachedScene = scene; _componentCache.Clear(); _semanticCache.Clear(); _nearbyCache.Clear(); _nearbyExpiresAt = 0;
+        _cachedScene = scene; _componentCache.Clear(); _deepComponentCache.Clear(); _semanticCache.Clear(); _nearbyCache.Clear(); _nearbyExpiresAt = 0;
     }
     private IReadOnlyList<SpawnCatalogEntry> SpawnCatalog()=>_spawns.GetEntries();
     private static int Score(string value,string query){if(string.IsNullOrWhiteSpace(query))return 0;value=value.ToLowerInvariant();query=query.ToLowerInvariant();if(value==query)return 0;if(value.Contains(query))return 1+value.IndexOf(query);return Levenshtein(value,query)+20;}
@@ -797,9 +887,11 @@ public sealed class GameToolset
     private static bool HeldObjectMatches(GameObject requested, GameObject? held) => held != null &&
         (held == requested || held.transform.IsChildOf(requested.transform) || requested.transform.IsChildOf(held.transform));
     private static string? HeldName(Hand? hand)=>hand==null?null:HeldObject(hand)?.name;
-    private Component? FindComponentByName(GameObject go,string name)=>Components(go).Components.FirstOrDefault(x=>x!=null&&x.GetType().Name==name);
+    private Component? FindComponentByName(GameObject go,string name)=>Components(go,true).Components.FirstOrDefault(x=>x!=null&&x.GetType().Name==name);
+    private static Vector3 CheckedDestination(Vector3 value) => float.IsFinite(value.x) && float.IsFinite(value.y) && float.IsFinite(value.z) ? value : throw new ArgumentException("Movement destination must be finite.");
+    private static float CheckedMoveSpeed(ToolCall call){var value=call.Arguments["speed"]?.Value<float>()??2.5f;if(!float.IsFinite(value)||value<0.1f||value>5f)throw new ArgumentException("Movement speed must be between 0.1 and 5 meters per second.");return value;}
     private static string Str(ToolCall c,string key)=>c.Arguments[key]?.Value<string>()??throw new ArgumentException("Missing string argument: "+key);
-    private static float Num(ToolCall c,string key)=>c.Arguments[key]?.Value<float>()??throw new ArgumentException("Missing numeric argument: "+key);
+    private static float Num(ToolCall c,string key){var value=c.Arguments[key]?.Value<float>()??throw new ArgumentException("Missing numeric argument: "+key);if(!float.IsFinite(value)||Math.Abs(value)>10000f)throw new ArgumentException(key+" must be a finite value with magnitude at most 10000.");return value;}
     private static Attack CreateAttack(float amount, Vector3 origin, Vector3 direction) => new()
     {
         damage = Mathf.Max(0f, amount),
@@ -808,7 +900,8 @@ public sealed class GameToolset
         direction = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward,
         normal = direction.sqrMagnitude > 0.0001f ? -direction.normalized : Vector3.back
     };
-    private static Vector3 Vec(JToken? token,Vector3? fallback=null)=>token==null?(fallback??throw new ArgumentException("Missing vector.")):new Vector3(token["x"]?.Value<float>()??0,token["y"]?.Value<float>()??0,token["z"]?.Value<float>()??0);
+    private static Vector3 Vec(JToken? token,Vector3? fallback=null){var value=token==null?(fallback??throw new ArgumentException("Missing vector.")):new Vector3(token["x"]?.Value<float>()??0,token["y"]?.Value<float>()??0,token["z"]?.Value<float>()??0);if(!float.IsFinite(value.x)||!float.IsFinite(value.y)||!float.IsFinite(value.z)||Math.Abs(value.x)>10000f||Math.Abs(value.y)>10000f||Math.Abs(value.z)>10000f)throw new ArgumentException("Vector coordinates must be finite and within 10000 units.");return value;}
+    private static Vector3 BoundedVector(JToken? token,float maximum){var value=Vec(token);if(value.sqrMagnitude>maximum*maximum)throw new ArgumentException("Vector magnitude exceeds safe gameplay limit of "+maximum+".");return value;}
     private static object V(Vector3 v)=>new{x=Math.Round(v.x,3),y=Math.Round(v.y,3),z=Math.Round(v.z,3)};
     private static object? ReadMember(object? o,string name){if(o==null)return null;var t=o.GetType();return t.GetProperty(name)?.GetValue(o)??t.GetField(name)?.GetValue(o);}
     private static void SetMember(object o,string name,object value){var t=o.GetType();var p=t.GetProperty(name);if(p!=null){p.SetValue(o,Convert.ChangeType(value,p.PropertyType));return;}var f=t.GetField(name)??throw new MissingMemberException(t.FullName,name);f.SetValue(o,Convert.ChangeType(value,f.FieldType));}

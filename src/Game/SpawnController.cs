@@ -26,40 +26,84 @@ public sealed class SpawnController
     private readonly FusionBridge _fusion;
     private IReadOnlyList<SpawnCatalogEntry>? _entries;
     private float _expiresAt;
+    private Il2CppSystem.Collections.Generic.List<Crate>? _pendingCrates;
+    private Dictionary<string, SpawnCatalogEntry>? _pendingEntries;
+    private int _scanIndex;
     private readonly Dictionary<string, Attempt> _attempts = new(StringComparer.Ordinal);
 
     public SpawnController(FusionBridge fusion) => _fusion = fusion;
+    public bool IsRefreshing => _pendingCrates != null;
+    public int EntryCount => _entries?.Count ?? 0;
 
     public IReadOnlyList<SpawnCatalogEntry> GetEntries()
     {
-        if (_entries != null && Time.unscaledTime < _expiresAt) return _entries;
+        if (_pendingCrates == null && Time.unscaledTime >= _expiresAt) StartCatalogScan();
+        return _entries ?? Array.Empty<SpawnCatalogEntry>();
+    }
+
+    private void StartCatalogScan()
+    {
         var warehouse = AssetWarehouse.Instance;
-        if (warehouse == null || !warehouse.InitialLoaded) return Array.Empty<SpawnCatalogEntry>();
-        var found = new Dictionary<string, SpawnCatalogEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var crate in warehouse.GetCrates())
+        if (warehouse == null || !warehouse.InitialLoaded) return;
+        _pendingCrates = warehouse.GetCrates();
+        _pendingEntries = new Dictionary<string, SpawnCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+        _scanIndex = 0;
+    }
+
+    public void TickCatalog(int maximum = 80)
+    {
+        try { TickCatalogCore(maximum); }
+        catch (Exception ex)
         {
-            if (crate is not SpawnableCrate spawnable) continue;
-            var barcode = spawnable.Barcode?.ID;
-            if (string.IsNullOrWhiteSpace(barcode)) continue;
-            var title = string.IsNullOrWhiteSpace(spawnable.Title) ? barcode : spawnable.Title;
-            var source = spawnable.Pallet?.Title ?? "Unknown pallet";
-            found[barcode] = new SpawnCatalogEntry(title, barcode, source, Category(title));
+            _pendingCrates = null;
+            _pendingEntries = null;
+            _expiresAt = Time.unscaledTime + 10f;
+            AgentLog.Warn("Spawn catalog scan failed; will retry: " + ex.GetBaseException().Message);
         }
+    }
+
+    private void TickCatalogCore(int maximum)
+    {
+        if (_pendingCrates == null)
+        {
+            if (Time.unscaledTime >= _expiresAt) StartCatalogScan();
+            if (_pendingCrates == null) return;
+        }
+        var crates = _pendingCrates;
+        var found = _pendingEntries!;
+        var end = Math.Min(crates.Count, _scanIndex + maximum);
+        for (; _scanIndex < end; _scanIndex++)
+        {
+            try
+            {
+                var crate = crates[_scanIndex];
+                if (crate is not SpawnableCrate spawnable) continue;
+                var barcode = spawnable.Barcode?.ID;
+                if (string.IsNullOrWhiteSpace(barcode)) continue;
+                var title = string.IsNullOrWhiteSpace(spawnable.Title) ? barcode : spawnable.Title;
+                var source = spawnable.Pallet?.Title ?? "Unknown pallet";
+                found[barcode] = new SpawnCatalogEntry(title, barcode, source, Category(title));
+            }
+            catch (Exception ex) { AgentLog.Debug("Skipped one invalid spawnable crate: " + ex.GetBaseException().Message); }
+        }
+        if (_scanIndex < crates.Count) return;
         _entries = found.Values.OrderBy(x => x.Title, StringComparer.OrdinalIgnoreCase).ToArray();
-        _expiresAt = Time.unscaledTime + 20f;
-        return _entries;
+        _expiresAt = Time.unscaledTime + 600f;
+        _pendingCrates = null;
+        _pendingEntries = null;
+        AgentLog.Info($"Spawn catalog ready: {_entries.Count} loaded entries.");
     }
 
     public int Refresh()
     {
-        _entries = null;
         _expiresAt = 0;
-        return GetEntries().Count;
+        if (_pendingCrates == null) StartCatalogScan();
+        return EntryCount;
     }
 
     public Attempt Spawn(string actionId, string query, Vector3 position, Quaternion rotation)
     {
-        if (GetEntries().Count == 0) throw new InvalidOperationException("The Marrow spawnable warehouse is not loaded yet.");
+        if (GetEntries().Count == 0) throw new InvalidOperationException(IsRefreshing ? "The spawn catalog is still loading; retry after it finishes." : "The Marrow spawnable warehouse is not loaded yet.");
         var entry = SpawnCatalogMatcher.Resolve(GetEntries(), query);
         if (!Finite(position.x) || !Finite(position.y) || !Finite(position.z))
             throw new ArgumentException("Spawn position must contain finite coordinates.");

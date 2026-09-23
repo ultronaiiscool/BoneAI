@@ -69,7 +69,7 @@ public sealed class VoiceAssistant : IDisposable
             _lastPosition = 0; _silentFor = 0; _heardSpeech = false; _lastPoll = Time.unscaledTime;
             Status = _listenOnce ? "Listening once…" : "Waiting for “" + _config.VoiceWakeWord.Value + "”…";
         }
-        catch (Exception ex) { Status = "Microphone error: " + ex.GetBaseException().Message; AgentLog.Warn(Status); Stop(); }
+        catch (Exception ex) { Status = "Microphone error: " + ex.GetBaseException().Message; AgentLog.Warn(Status); Stop(); _nextStartAttempt = Time.unscaledTime + 3f; }
     }
 
     private void Finish(int sampleCount)
@@ -83,13 +83,14 @@ public sealed class VoiceAssistant : IDisposable
         var managed = new float[samples.Length];
         for (var i = 0; i < samples.Length; i++) managed[i] = samples[i];
         _busy = true; Status = "Transcribing…";
-        _ = TranscribeAndSendAsync(BuildWav(managed, channels));
+        _ = TranscribeAndSendAsync(managed, channels);
     }
 
-    private async Task TranscribeAndSendAsync(byte[] wav)
+    private async Task TranscribeAndSendAsync(float[] samples, int channels)
     {
         try
         {
+            var wav = await Task.Run(() => BuildWav(samples, channels)).ConfigureAwait(false);
             using var form = new MultipartFormDataContent();
             var audio = new ByteArrayContent(wav); audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
             form.Add(audio, "file", "boneai-voice.wav"); form.Add(new StringContent("gpt-4o-transcribe"), "model");
@@ -125,7 +126,7 @@ public sealed class VoiceAssistant : IDisposable
     {
         try
         {
-            var body = new JObject { ["model"] = "gpt-4o-mini-tts", ["voice"] = "coral", ["input"] = Trim(text, 1800), ["response_format"] = "wav" };
+            var body = new JObject { ["model"] = "gpt-4o-mini-tts", ["voice"] = "coral", ["input"] = Trim(text, 350), ["response_format"] = "wav" };
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", RuntimeSecrets.GetProviderApiKey("OpenAI") ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
             request.Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");

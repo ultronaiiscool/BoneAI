@@ -24,6 +24,7 @@ public sealed class ConversationManager : IDisposable
     public string CurrentAction { get; private set; } = "Idle";
     public bool Connected => _client?.Connected == true;
     public bool CodexSignedIn { get; private set; }
+    public IReadOnlyList<CodexModelInfo> CodexModels { get; private set; } = Array.Empty<CodexModelInfo>();
     public string DeviceLoginCode { get; private set; } = string.Empty;
     public string DeviceLoginUrl { get; private set; } = string.Empty;
     public event Action<string>? ResponseCompleted;
@@ -65,6 +66,19 @@ public sealed class ConversationManager : IDisposable
         }
         catch (Exception ex) { Status = "Unavailable: " + ex.GetBaseException().Message; AgentLog.Warn(Status); }
         finally { _connectGate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<CodexModelInfo>> ListCodexModelsAsync(bool includeHidden)
+    {
+        if (!_config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose Codex as the provider first.");
+        if (_client is not CodexAppServerClient codex || !codex.Connected) await ConnectAsync().ConfigureAwait(false);
+        if (_client is not CodexAppServerClient connected || !connected.Connected)
+            throw new InvalidOperationException(Status);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var models = await connected.ListModelsAsync(includeHidden, timeout.Token).ConfigureAwait(false);
+        CodexModels = models;
+        return models;
     }
 
     public async Task<CodexDeviceLogin> StartCodexDeviceLoginAsync()
@@ -243,7 +257,8 @@ public sealed class ConversationManager : IDisposable
         if (_client != null && requested == _activeProvider) return;
         _client?.Dispose();
         _activeProvider = requested;
-        _client = requested == "Codex" ? new CodexAppServerClient(_tools, _codexBearerToken) : new ApiProviderClient(_config, _tools);
+        _client = requested == "Codex" ? new CodexAppServerClient(_tools, _codexBearerToken,
+            () => (_config.CodexModel.Value, _config.CodexEffort.Value)) : new ApiProviderClient(_config, _tools);
         _client.StatusChanged += value => { Status = value; AgentLog.Info(requested + " " + value); };
         if (_client is CodexAppServerClient codex)
             codex.LoginCompleted += (success, error) =>

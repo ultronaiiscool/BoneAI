@@ -24,6 +24,7 @@
     <p id="status" role="status" aria-live="polite">Choose a mode, then press Start listening.</p>
     <label for="mode">Speech recognition</label>
     <select id="mode">
+      <option value="auto">Automatic (on-device first, then browser)</option>
       <option value="local">On-device (no speech-service connection)</option>
       <option value="browser">Browser speech service (may need internet)</option>
     </select>
@@ -61,13 +62,14 @@
   const sendStatus = document.getElementById('send-status');
   const button = document.getElementById('start');
   const mode = document.getElementById('mode');
+  if (window.location?.hash === '#local') mode.value = 'local';
   const modeHelp = document.getElementById('mode-help');
   const language = document.getElementById('language');
   const heard = document.getElementById('heard');
   document.getElementById('wake').textContent = WAKE;
   const localSupported = !!(SR && 'processLocally' in SR.prototype &&
     typeof SR.available === 'function' && typeof SR.install === 'function');
-  let active = false, preparing = false, recognition = null, restartTimer = null, armedUntil = 0;
+  let active = false, preparing = false, recognition = null, restartTimer = null, armedUntil = 0, useLocal = false;
 
   function setStatus(message, error = false) {
     status.textContent = message;
@@ -82,12 +84,13 @@
       return;
     }
     if (!localSupported) {
-      mode.value = 'browser';
       mode.querySelector('[value="local"]').disabled = true;
-      modeHelp.textContent = 'On-device speech is not exposed by this browser. Its browser service may require internet or be unavailable.';
+      if (mode.value === 'local') mode.value = 'auto';
+      modeHelp.textContent = 'On-device speech is not exposed by this browser. Automatic mode uses its browser service; typed commands remain available.';
     } else {
       modeHelp.textContent = mode.value === 'local' ?
         'On-device mode avoids the browser speech-service network error after its language model is installed.' :
+        mode.value === 'auto' ? 'Automatic tries a local language model first and uses the browser service if local setup fails.' :
         'The browser service may need internet and can fail independently of BoneAI.';
     }
   }
@@ -125,7 +128,7 @@
     current.lang = language.value;
     current.continuous = true;
     current.interimResults = false;
-    if (mode.value === 'local') current.processLocally = true;
+    if (useLocal) current.processLocally = true;
     current.onstart = () => setStatus('Listening for “' + WAKE + '”…');
     current.onresult = event => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -171,9 +174,14 @@
     preparing = true;
     updateButton();
     try {
+      useLocal = false;
       if (mode.value === 'local') {
         if (!localSupported) throw new Error('On-device speech is unavailable in this browser.');
         await ensureLocalModel();
+        useLocal = true;
+      } else if (mode.value === 'auto' && localSupported) {
+        try { await ensureLocalModel(); useLocal = true; }
+        catch (error) { setStatus('On-device speech unavailable (' + error.message + '). Trying browser service…'); }
       }
       active = true;
       beginRecognition();

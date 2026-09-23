@@ -19,6 +19,7 @@ public sealed class CodexAppServerClient : IAgentClient
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ToolRegistry _tools;
     private readonly Func<string> _bearerToken;
+    private readonly Func<(string Model, string Effort)> _modelSelection;
     private long _requestId;
     private string _assistantText = string.Empty;
     private readonly HashSet<string> _finalMessageIds = new(StringComparer.Ordinal);
@@ -33,10 +34,33 @@ public sealed class CodexAppServerClient : IAgentClient
     public event Action<string>? DeltaReceived;
     public event Action<bool, string?>? LoginCompleted;
 
-    public CodexAppServerClient(ToolRegistry tools, Func<string> bearerToken)
+    public CodexAppServerClient(ToolRegistry tools, Func<string> bearerToken, Func<(string Model, string Effort)> modelSelection)
     {
         _tools = tools;
         _bearerToken = bearerToken;
+        _modelSelection = modelSelection;
+    }
+
+    public async Task<IReadOnlyList<CodexModelInfo>> ListModelsAsync(bool includeHidden, CancellationToken cancellationToken)
+    {
+        if (!Connected) throw new InvalidOperationException("Connect Codex before browsing models.");
+        var models = new Dictionary<string, CodexModelInfo>(StringComparer.Ordinal);
+        string? cursor = null;
+        for (var page = 0; page < 10; page++)
+        {
+            var parameters = new JObject { ["limit"] = 100, ["includeHidden"] = includeHidden };
+            if (cursor != null) parameters["cursor"] = cursor;
+            var response = await RequestAsync("model/list", parameters, cancellationToken).ConfigureAwait(false);
+            foreach (var item in response.SelectToken("result.data") as JArray ?? new JArray())
+            {
+                var parsed = CodexModelInfo.Parse(item);
+                if (parsed != null) models[parsed.Id] = parsed;
+            }
+            var next = response.SelectToken("result.nextCursor")?.Value<string>();
+            if (string.IsNullOrWhiteSpace(next) || next == cursor) break;
+            cursor = next;
+        }
+        return models.Values.OrderByDescending(x => x.IsDefault).ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public async Task ConnectAsync(string endpoint, CancellationToken cancellationToken)
@@ -56,7 +80,7 @@ public sealed class CodexAppServerClient : IAgentClient
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "3.1.1" },
+            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "3.2.0" },
             ["capabilities"] = new JObject { ["experimentalApi"] = true }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);
@@ -107,6 +131,8 @@ public sealed class CodexAppServerClient : IAgentClient
             ["sandbox"] = "read-only",
             ["approvalPolicy"] = "never"
         };
+        var selection = _modelSelection();
+        if (!string.IsNullOrWhiteSpace(selection.Model)) dynamicParams["model"] = selection.Model;
         try
         {
             if (!string.IsNullOrWhiteSpace(resumeThreadId)) dynamicParams["threadId"] = resumeThreadId;
@@ -117,12 +143,14 @@ public sealed class CodexAppServerClient : IAgentClient
         {
             AgentLog.Warn("Native Codex dynamic tools unavailable; using strict structured fallback: " + ex.GetBaseException().Message);
             NativeToolsEnabled = false;
+            var fallbackParams = (JObject)dynamicParams.DeepClone();
+            fallbackParams.Remove("dynamicTools");
             if (!string.IsNullOrWhiteSpace(resumeThreadId))
             {
-                try { response = await RequestAsync("thread/resume", new JObject { ["threadId"] = resumeThreadId, ["baseInstructions"] = GameOnlyInstructions, ["developerInstructions"] = GameOnlyInstructions, ["sandbox"] = "read-only", ["approvalPolicy"] = "never" }, cancellationToken).ConfigureAwait(false); }
-                catch { response = await RequestAsync("thread/start", new JObject { ["baseInstructions"] = GameOnlyInstructions, ["developerInstructions"] = GameOnlyInstructions, ["sandbox"] = "read-only", ["approvalPolicy"] = "never" }, cancellationToken).ConfigureAwait(false); }
+                try { response = await RequestAsync("thread/resume", fallbackParams, cancellationToken).ConfigureAwait(false); }
+                catch { fallbackParams.Remove("threadId"); response = await RequestAsync("thread/start", fallbackParams, cancellationToken).ConfigureAwait(false); }
             }
-            else response = await RequestAsync("thread/start", new JObject { ["baseInstructions"] = GameOnlyInstructions, ["developerInstructions"] = GameOnlyInstructions, ["sandbox"] = "read-only", ["approvalPolicy"] = "never" }, cancellationToken).ConfigureAwait(false);
+            else response = await RequestAsync("thread/start", fallbackParams, cancellationToken).ConfigureAwait(false);
         }
         ThreadId = response.SelectToken("result.thread.id")?.Value<string>() ?? response.SelectToken("result.threadId")?.Value<string>();
         if (string.IsNullOrWhiteSpace(ThreadId)) throw new InvalidOperationException("Codex did not return a thread ID.");
@@ -141,9 +169,11 @@ public sealed class CodexAppServerClient : IAgentClient
         var parameters = new JObject
         {
             ["threadId"] = ThreadId,
-            ["input"] = new JArray(new JObject { ["type"] = "text", ["text"] = prompt }),
-            ["effort"] = "high"
+            ["input"] = new JArray(new JObject { ["type"] = "text", ["text"] = prompt })
         };
+        var selection = _modelSelection();
+        if (!string.IsNullOrWhiteSpace(selection.Model)) parameters["model"] = selection.Model;
+        if (!string.IsNullOrWhiteSpace(selection.Effort)) parameters["effort"] = selection.Effort;
         if (outputSchema != null) parameters["outputSchema"] = outputSchema;
         await RequestAsync("turn/start", parameters, timeout.Token).ConfigureAwait(false);
         return await _turn.Task.ConfigureAwait(false);
