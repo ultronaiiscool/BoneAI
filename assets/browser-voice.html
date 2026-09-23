@@ -145,6 +145,7 @@
       }
     };
     current.onerror = event => {
+      if (recognition !== current) return;
       const error = event.error || 'unknown';
       if (error === 'no-speech') { setStatus('No speech heard. Listening again…'); return; }
       active = false;
@@ -157,7 +158,8 @@
       else setStatus('Browser speech error: ' + error + '. Try another mode or type a command below.', true);
     };
     current.onend = () => {
-      if (recognition === current) recognition = null;
+      if (recognition !== current) return;
+      recognition = null;
       if (active) restartTimer = setTimeout(beginRecognition, 1200);
     };
     try { current.start(); }
