@@ -22,6 +22,7 @@ public sealed class AgentMenu
     private StringElement? _transcript;
     private StringElement? _loginCode;
     private StringElement? _providerKey;
+    private StringElement? _runtimeStatus;
     private bool _clearingProviderKey;
     private GameObject? _nativeButton;
     private float _nextRefresh;
@@ -31,22 +32,24 @@ public sealed class AgentMenu
 
     public void Create()
     {
-        var orange = new Color(1f, 0.38f, 0.03f);
-        _root = new Page(Page.Root, "BoneAI", orange, 9) { BackgroundOpacity = 0.92f };
-        var assistant = _root.CreatePage("Assistant", orange, 9);
-        _prompt = assistant.CreateString("Prompt", Color.white, "Ask or command BoneAI", _ => { });
-        assistant.CreateFunction("Send", Color.green, SendPrompt);
+        var orange = new Color(1f, 0.42f, 0.08f);
+        var cyan = new Color(0.28f, 0.82f, 1f);
+        var mint = new Color(0.32f, 0.94f, 0.68f);
+        _root = new Page(Page.Root, "BoneAI", orange, 9) { BackgroundOpacity = 0.96f };
+        var assistant = _root.CreatePage("Assistant · Home", orange, 9);
+        _status = assistant.CreateString("● Connection", mint, "Starting", _ => { });
+        _activity = assistant.CreateString("Current action", cyan, "Idle", _ => { });
+        _prompt = assistant.CreateString("Ask BoneAI", Color.white, "Type a question or game command", _ => { });
+        assistant.CreateFunction("Send prompt", mint, SendPrompt);
         assistant.CreateFunction("Listen Once (Voice Beta)", orange, _mod.Voice.ListenOnce);
         assistant.CreateFunction("Cancel Request", Color.yellow, _mod.Conversation.Cancel);
-        _status = assistant.CreateString("Connection", Color.gray, "Starting", _ => { });
-        _activity = assistant.CreateString("Current Action", Color.gray, "Idle", _ => { });
-        _response = assistant.CreateString("Last Response", Color.white, "None", _ => { });
-        assistant.CreateFunction("Show Full Response", Color.white, ShowResponse);
+        _response = assistant.CreateString("AI reply", Color.white, "None", _ => { });
+        assistant.CreateFunction("Read full reply", cyan, ShowResponse);
 
-        _conversations = _root.CreatePage("Saved Conversations", new Color(0.35f, 0.8f, 1f), 8);
+        _conversations = _root.CreatePage("Conversations", cyan, 8);
         BuildConversations();
 
-        var voice = _root.CreatePage("Voice AI (Beta)", orange, 9);
+        var voice = _root.CreatePage("Voice · Beta", orange, 9);
         Bind(voice, "Voice AI Beta", _mod.Config.VoiceBetaEnabled);
         Bind(voice, "Require Wake Word", _mod.Config.VoiceWakeWordEnabled);
         voice.CreateString("Wake Word", Color.white, _mod.Config.VoiceWakeWord.Value, v => _mod.Config.VoiceWakeWord.Value = string.IsNullOrWhiteSpace(v) ? "Hey BoneAI" : v.Trim());
@@ -58,9 +61,10 @@ public sealed class AgentMenu
         _transcript = voice.CreateString("Last Transcript", Color.white, "None", _ => { });
         voice.CreateFunction("Voice Setup Help", Color.yellow, () => Notify("Voice Beta", "Free Browser Voice uses Edge/Chrome/Quest Browser and needs no STT key. Keep its page open. The original in-game microphone mode still requires an OpenAI key."));
 
-        var provider = _root.CreatePage("AI Provider", new Color(0.55f, 0.55f, 1f), 9);
+        var provider = _root.CreatePage("AI Provider", cyan, 9);
+        provider.CreateFunction("Codex account sign-in", mint, SelectCodex);
+        provider.CreateFunction("Free OpenRouter", mint, SelectFreeOpenRouter);
         provider.CreateFunction("Paid OpenAI Direct", Color.white, SelectQuestStandaloneOpenAi);
-        provider.CreateFunction("Free OpenRouter", Color.green, SelectFreeOpenRouter);
         provider.CreateFunction("Change Provider", Color.cyan, CycleProvider);
         provider.CreateString("Provider", Color.white, _mod.Config.Provider.Value, v => _mod.Config.Provider.Value = v);
         provider.CreateString("Model", Color.white, _mod.Config.ProviderModel.Value, v => _mod.Config.ProviderModel.Value = v);
@@ -70,14 +74,15 @@ public sealed class AgentMenu
         provider.CreateFunction("Reconnect", Color.green, () => _ = _mod.Conversation.ConnectAsync());
         provider.CreateFunction("New Conversation", Color.cyan, () => _ = _mod.Conversation.NewConversationAsync());
 
-        var codex = _root.CreatePage("Codex Sign-In", new Color(0.18f, 0.72f, 1f), 9);
+        var codex = _root.CreatePage("Codex Account", cyan, 9);
+        _runtimeStatus = codex.CreateString("Local App Server", Color.white, "Checking", _ => { });
         _loginCode = codex.CreateString("One-Time Code", Color.white, "Not started", _ => { });
         codex.CreateFunction("Sign In With Codex", Color.green, () => _ = SignInWithCodexAsync());
         codex.CreateFunction("Open Sign-In Page Again", Color.cyan, OpenLoginPage);
         codex.CreateFunction("Reconnect", Color.white, () => _ = _mod.Conversation.ConnectAsync());
         codex.CreateFunction("Sign Out", Color.red, () => _ = SignOutCodexAsync());
         codex.CreateFunction("About Saved Login", Color.white, () => Notify("Codex Login", "Codex securely keeps and refreshes your login. It remains signed in after restarts until you choose Sign Out."));
-        codex.CreateFunction("Quest Standalone Help", Color.yellow, () => Notify("Quest Standalone", "Choose Free OpenRouter and enter your OpenRouter key. Official Codex account mode still requires Codex App Server, which OpenAI does not publish for Android."));
+        codex.CreateFunction("Quest Setup", Color.yellow, () => Notify("Quest Codex", "Install the v3 Quest package with its native library in UserLibs. Choose Codex account sign-in, enter the one-time code in the browser, then return to BONELAB."));
 
         var permissions = _root.CreatePage("Game Permissions", Color.yellow, 9);
         permissions.CreateFunction("Enable All Game Controls", Color.green, EnableAll);
@@ -111,6 +116,7 @@ public sealed class AgentMenu
         if (_voiceStatus != null) _voiceStatus.Value = Trim(_mod.BrowserVoice.Running ? _mod.BrowserVoice.Status : _mod.Voice.Status, 100);
         if (_transcript != null) _transcript.Value = Trim(_mod.Voice.LastTranscript, 100);
         if (_loginCode != null) _loginCode.Value = string.IsNullOrWhiteSpace(_mod.Conversation.DeviceLoginCode) ? (_mod.Conversation.CodexSignedIn ? "Signed in (saved by Codex)" : "Not signed in") : _mod.Conversation.DeviceLoginCode;
+        if (_runtimeStatus != null) _runtimeStatus.Value = Trim(Infrastructure.PlatformInfo.IsAndroid ? _mod.QuestCodexHost.Status : _mod.CodexHost.Status, 100);
         if (_conversationCount != _mod.Conversation.SavedConversationCount) BuildConversations();
     }
 
@@ -177,10 +183,8 @@ public sealed class AgentMenu
     {
         try
         {
-            if (Infrastructure.PlatformInfo.IsAndroid)
-                throw new PlatformNotSupportedException("Quest cannot complete official Codex account mode because OpenAI does not publish Codex App Server for Android. The browser code alone cannot run Codex. Use Free OpenRouter on Quest.");
-            if (!Infrastructure.PlatformInfo.IsAndroid && !await _mod.EnsureCodexHostAsync().ConfigureAwait(false))
-                throw new InvalidOperationException(_mod.CodexHost.Status);
+            if (!await _mod.EnsureCodexHostAsync().ConfigureAwait(false))
+                throw new InvalidOperationException(Infrastructure.PlatformInfo.IsAndroid ? _mod.QuestCodexHost.Status : _mod.CodexHost.Status);
             var login = await _mod.Conversation.StartCodexDeviceLoginAsync().ConfigureAwait(false);
             await _mod.Dispatcher.InvokeAsync(() =>
             {
@@ -200,8 +204,8 @@ public sealed class AgentMenu
     {
         try
         {
-            if (Infrastructure.PlatformInfo.IsAndroid) throw new PlatformNotSupportedException("Codex App Server is not available on Quest.");
-            if (!await _mod.EnsureCodexHostAsync().ConfigureAwait(false)) throw new InvalidOperationException(_mod.CodexHost.Status);
+            if (!await _mod.EnsureCodexHostAsync().ConfigureAwait(false))
+                throw new InvalidOperationException(Infrastructure.PlatformInfo.IsAndroid ? _mod.QuestCodexHost.Status : _mod.CodexHost.Status);
             _mod.Config.Provider.Value = "Codex";
             await _mod.Conversation.ConnectAsync().ConfigureAwait(false);
             await _mod.Conversation.LogoutCodexAsync().ConfigureAwait(false);
@@ -230,6 +234,14 @@ public sealed class AgentMenu
         _mod.Config.ProviderModel.Value = AI.ProviderCatalog.DefaultModel("OpenAI");
         _mod.Config.ProviderBaseUrl.Value = string.Empty;
         Notify("Quest Standalone", "OpenAI direct mode selected. Enter your OpenAI API key below; no PC or bridge is used.");
+    }
+    private void SelectCodex()
+    {
+        _mod.Config.Provider.Value = "Codex";
+        _mod.Config.ProviderModel.Value = string.Empty;
+        _mod.Config.ProviderBaseUrl.Value = string.Empty;
+        Notify("Codex Account", "Codex selected. Open Codex Account and choose Sign In With Codex.");
+        _ = _mod.Conversation.ConnectAsync();
     }
     private void SelectFreeOpenRouter()
     {

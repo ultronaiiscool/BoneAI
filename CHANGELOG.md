@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.0 — Native Quest Codex
+
+- Integrated an Android ARM64 Codex App Server from the BoneAI branch of the user's Codex fork. Quest can start it inside BONELAB and use persistent ChatGPT/Codex device-code sign-in without a PC or API key.
+- Kept one managed `BoneAI.dll` for PCVR and Quest. The Quest package additionally contains the native `.so` and checksum under `UserLibs`; the native source remains in the pinned Codex fork.
+- Restricted the embedded App Server to BoneAI's dynamic game tools and added a random per-session bearer token to its localhost WebSocket.
+- Added checksum validation, native ABI version checking, private Android storage for Codex state, bounded startup readiness checks, and clean failure status.
+- Reorganized the in-game BoneAI pages with clearer assistant, provider, voice, account, and runtime status controls.
+- Kept OpenRouter Free, other API providers, voice beta, SpawnLab, Fusion, saved conversations, and the existing tool catalog.
+- Android ARM64 build validation is available; physical Quest/LemonLoader gameplay testing remains necessary.
+- No autoupdater.
+
 ## 2.7.0 — Free Voice
 
 - Added **OpenRouter Free**, backed by the official `openrouter/free` router. Users bring their own OpenRouter key, while the router selects a currently available free model that supports the requested features, including tool calling when available.

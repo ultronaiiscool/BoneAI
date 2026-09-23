@@ -11,6 +11,8 @@ public sealed class ConversationManager : IDisposable
     private readonly AgentConfig _config;
     private readonly ToolRegistry _tools;
     private readonly GameToolset _game;
+    private readonly Func<Task<bool>> _ensureCodexHost;
+    private readonly Func<string> _codexBearerToken;
     private IAgentClient? _client;
     private string _activeProvider = string.Empty;
     private CancellationTokenSource? _active;
@@ -28,9 +30,11 @@ public sealed class ConversationManager : IDisposable
     public IReadOnlyList<SavedConversation> SavedConversations => _store.List();
     public int SavedConversationCount => _store.Count;
 
-    public ConversationManager(AgentConfig config, ToolRegistry tools, GameToolset game)
+    public ConversationManager(AgentConfig config, ToolRegistry tools, GameToolset game,
+        Func<Task<bool>> ensureCodexHost, Func<string> codexBearerToken)
     {
         _config = config; _tools = tools; _game = game;
+        _ensureCodexHost = ensureCodexHost; _codexBearerToken = codexBearerToken;
         _tools.ActionChanged += value => CurrentAction = value;
     }
 
@@ -40,6 +44,8 @@ public sealed class ConversationManager : IDisposable
         try
         {
             EnsureClient();
+            if (_activeProvider == "Codex" && !await _ensureCodexHost().ConfigureAwait(false))
+                throw new InvalidOperationException("Codex host is not available");
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             await _client!.ConnectAsync(_config.Endpoint.Value, timeout.Token);
             if (_client is CodexAppServerClient codex)
@@ -68,6 +74,8 @@ public sealed class ConversationManager : IDisposable
         {
             _config.Provider.Value = "Codex";
             EnsureClient();
+            if (!await _ensureCodexHost().ConfigureAwait(false))
+                throw new InvalidOperationException("Codex host is not available");
             if (!_client!.Connected)
             {
                 using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -235,7 +243,7 @@ public sealed class ConversationManager : IDisposable
         if (_client != null && requested == _activeProvider) return;
         _client?.Dispose();
         _activeProvider = requested;
-        _client = requested == "Codex" ? new CodexAppServerClient(_tools) : new ApiProviderClient(_config, _tools);
+        _client = requested == "Codex" ? new CodexAppServerClient(_tools, _codexBearerToken) : new ApiProviderClient(_config, _tools);
         _client.StatusChanged += value => { Status = value; AgentLog.Info(requested + " " + value); };
         if (_client is CodexAppServerClient codex)
             codex.LoginCompleted += (success, error) =>

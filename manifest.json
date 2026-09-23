@@ -1,8 +1,8 @@
 {
   "name": "BoneAI",
-  "version_number": "2.7.0",
+  "version_number": "3.0.0",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
-  "description": "Free OpenRouter routing, keyless browser wake-word voice beta, persistent authentication, 350 tools, SpawnLab, and Fusion.",
+  "description": "BoneAI v3: native Quest Codex account sign-in, OpenRouter Free, voice beta, game tools, SpawnLab, and Fusion.",
   "dependencies": [
     "LavaGang-MelonLoader-0.7.3",
     "bonelib-BoneLib-3.2.2",

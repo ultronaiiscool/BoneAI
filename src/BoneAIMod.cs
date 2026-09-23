@@ -19,6 +19,7 @@ public sealed class BoneAIMod : MelonMod
     public ConversationManager Conversation { get; private set; } = null!;
     public AgentMenu Menu { get; private set; } = null!;
     public CodexHostManager CodexHost { get; private set; } = null!;
+    public QuestCodexHostManager QuestCodexHost { get; private set; } = null!;
     public VoiceAssistant Voice { get; private set; } = null!;
     public BrowserVoiceServer BrowserVoice { get; private set; } = null!;
 
@@ -28,7 +29,7 @@ public sealed class BoneAIMod : MelonMod
         Config = new AgentConfig();
         AgentLog.Verbose = Config.DebugLogging.Value;
         RuntimeSecrets.Initialize();
-        AgentLog.Info("Starting BoneAI 2.7.0 Free Voice on " + PlatformInfo.DisplayName);
+        AgentLog.Info("Starting BoneAI 3.0.0 on " + PlatformInfo.DisplayName);
         AgentLog.Info($"Unity {UnityEngine.Application.unityVersion}; BONELAB build {UnityEngine.Application.version}");
 
         Fusion = new FusionBridge();
@@ -37,7 +38,8 @@ public sealed class BoneAIMod : MelonMod
         Tools.RegisterDiscoveryTools();
         Game = new GameToolset(Config, Fusion);
         Game.RegisterTools(Tools);
-        Conversation = new ConversationManager(Config, Tools, Game);
+        QuestCodexHost = new QuestCodexHostManager(Dispatcher);
+        Conversation = new ConversationManager(Config, Tools, Game, EnsureCodexHostAsync, () => QuestCodexHost.BearerToken);
         Voice = new VoiceAssistant(Config, Conversation, Dispatcher);
         BrowserVoice = new BrowserVoiceServer(Conversation, Config);
         CodexHost = new CodexHostManager();
@@ -62,6 +64,8 @@ public sealed class BoneAIMod : MelonMod
         catch (Exception ex) { AgentLog.Exception("shutdown", ex); }
         try { CodexHost.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("Codex host shutdown", ex); }
+        try { QuestCodexHost.Dispose(); }
+        catch (Exception ex) { AgentLog.Exception("Quest Codex host shutdown", ex); }
         try { Voice.Dispose(); }
         catch (Exception ex) { AgentLog.Exception("voice shutdown", ex); }
         try { BrowserVoice.Dispose(); }
@@ -72,10 +76,9 @@ public sealed class BoneAIMod : MelonMod
     {
         try
         {
-            if (!PlatformInfo.IsAndroid && Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
+            if (Config.Provider.Value.Equals("Codex", StringComparison.OrdinalIgnoreCase))
             {
-                await CodexHost.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartCodexHost.Value).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(CodexHost.Endpoint)) Config.Endpoint.Value = CodexHost.Endpoint;
+                await EnsureCodexHostAsync().ConfigureAwait(false);
             }
             await Conversation.ConnectAsync().ConfigureAwait(false);
         }
@@ -85,7 +88,12 @@ public sealed class BoneAIMod : MelonMod
 
     public async Task<bool> EnsureCodexHostAsync()
     {
-        if (PlatformInfo.IsAndroid) return false;
+        if (PlatformInfo.IsAndroid)
+        {
+            var questReady = await QuestCodexHost.EnsureStartedAsync().ConfigureAwait(false);
+            if (questReady) Config.Endpoint.Value = QuestCodexHost.Endpoint;
+            return questReady;
+        }
         var ready = await CodexHost.EnsureStartedAsync(Config.Endpoint.Value, Config.AutoStartCodexHost.Value).ConfigureAwait(false);
         if (ready && !string.IsNullOrWhiteSpace(CodexHost.Endpoint)) Config.Endpoint.Value = CodexHost.Endpoint;
         return ready;

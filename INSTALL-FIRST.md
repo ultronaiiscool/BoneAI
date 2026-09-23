@@ -1,22 +1,12 @@
-# Install BoneAI
+# Install BoneAI v3
 
-1. Install MelonLoader 0.7.3 and BoneLib 3.2.2.
-2. On Quest, no PC software is required. On PCVR, install Codex only if you want optional ChatGPT/Codex account login.
-3. Install LabFusion 1.14.2 if you want multiplayer features.
-4. Install SpawnLab 1.0.1 if you want BoneAI to spawn items, NPCs, props, and vehicles.
-5. Put the included universal `BoneAI.dll` in BONELAB's `Mods` folder. It is the same DLL on PCVR and Quest.
-6. Start BONELAB and open **Preferences → BoneAI → AI Provider**.
-7. On Quest choose **Free OpenRouter**, enter your OpenRouter key in-game, and reconnect. The encrypted key remains available until you clear it in BoneAI.
-8. On PCVR you may instead use **Codex Sign-In → Sign In With Codex**. Then open **BoneAI → Assistant**.
+1. Install BONELAB, a compatible MelonLoader (PCVR) or LemonLoader (Quest), and BoneLib.
+2. Copy `Mods/BoneAI.dll` from the v3 package into your game's `Mods` directory. It is one universal managed DLL for PCVR and Quest.
+3. On Quest, if you want Codex account sign-in, also copy the package's `UserLibs/libcodex_app_server.so` and `.sha256` file into LemonLoader's `UserLibs` directory.
+4. Install Fusion for multiplayer features and SpawnLab for spawning. BoneAI can load without either; their actions report unavailable when absent.
+5. Open **Preferences → BoneAI → AI Provider**. Choose **Codex account sign-in** or **Free OpenRouter**.
+6. For Codex, use **Codex Account → Sign In With Codex** and finish the one-time browser code. On PCVR, install the Codex CLI/App Server first. On Quest, the bundled native library runs inside BONELAB.
+7. For OpenRouter Free, enter your own OpenRouter key under **API Key (saved securely)** and reconnect.
+8. Use **Assistant · Home** to send a prompt. The prompt field clears when sent.
 
-On PCVR, BoneAI directly starts the installed Codex App Server. There is no Python helper or second BoneAI DLL.
-
-On standalone Quest, install the same DLL through LemonLoader. BoneAI calls OpenAI, Claude, Grok, DeepSeek, OpenRouter, or a compatible custom provider directly over HTTPS. No PC, bridge, or remote BoneAI host is used. Official Codex account login remains PCVR-only because it requires Codex App Server.
-
-To use OpenAI, Claude, Grok, DeepSeek, or OpenRouter, choose it under **Preferences → BoneAI → AI Provider**, enter the provider key in **API Key (saved securely)**, and reconnect. Use **Clear Current API Key** to remove it. Local Ollama needs no secret but is normally useful only on PCVR.
-
-Voice AI is optional. **Open Free Browser Voice** needs no STT key and waits for the wake word in a browser page; the original in-game transcription mode uses the OpenAI key entered under **AI Provider**.
-
-Use Thunderstore/r2modman or the GitHub Releases page for future versions.
-
-For examples, multiplayer details, privacy information, and troubleshooting, read `README.md`.
+No Python bridge or autoupdater is included. The Android native library is a community build; Quest Codex account mode still needs physical headset validation. See `README.md` and `QUEST-README.md` for setup, limitations, and troubleshooting.

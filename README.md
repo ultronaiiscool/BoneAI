@@ -16,7 +16,9 @@ Ask normal questions or give commands such as:
 
 > Change me to my Morty avatar and make me stronger.
 
-BoneAI v2.7.0 uses the same universal `BoneAI.dll` on Windows PCVR and standalone Quest/LemonLoader. The avatar catalog and all BoneAI runtime code are inside that single DLL. Quest can use the free-model OpenRouter router or other supported cloud providers directly from the headset: no PC, Python bridge, or remote BoneAI host is needed. PCVR can additionally use persistent official Codex account sign-in through a locally installed Codex App Server.
+BoneAI v3 uses one managed `BoneAI.dll` for Windows PCVR and standalone Quest/LemonLoader. Quest Codex account mode also includes an Android ARM64 native App Server library from the [BoneAI build branch of the Codex fork](https://github.com/ultronaiiscool/codex-termux/tree/quest/boneai-v3-secure). The library runs inside BONELAB, so no PC or Python bridge is needed while playing. Quest can still use OpenRouter Free or another supported API provider without the native library.
+
+For native source provenance and the security boundary, see [native/README.md](native/README.md). The pinned Rust workspace and Android build inputs are included in `native/codex-android-source-v3.zip`, so Quest source is available directly from BoneAI as well as its fork. Release builders can package a successful native CI artifact with the compiled DLL using [scripts/package-v3.ps1](scripts/package-v3.ps1).
 
 ## Start here
 
@@ -25,25 +27,25 @@ BoneAI v2.7.0 uses the same universal `BoneAI.dll` on Windows PCVR and standalon
 - BONELAB PCVR `1.744.58126`
 - MelonLoader `0.7.3` using the .NET 6 runtime
 - BoneLib `3.2.2`
-- Internet access and an OpenRouter key for the free-model Quest option, or another supported provider key
-- Codex CLI/App Server only if you choose optional Codex account login on PCVR
+- Internet access and either Codex account sign-in or a key for a supported API provider
+- Codex CLI/App Server on PCVR only if you choose account sign-in; Quest account mode uses the bundled Android native library
 - LabFusion `1.14.2` for multiplayer features (optional for offline play)
 - SpawnLab `1.0.1` for spawning (BoneAI still loads without it, but spawn tools report that the provider is unavailable)
 
-Only BoneAI's own DLL is included in the release. BoneLib, Fusion, SpawnLab, BONELAB, and Codex belong to their respective authors and must be installed separately.
+The v3 Quest bundle includes BoneAI's DLL and the Android native App Server library. BoneLib, Fusion, SpawnLab, and BONELAB belong to their respective authors and must be installed separately.
 
 ### Install BoneAI
 
 1. Download the latest `BoneAI-v*.zip` from Releases.
-2. Copy `BoneAI.dll` into BONELAB's `Mods` folder.
+2. Copy `BoneAI.dll` into BONELAB's `Mods` folder. For Quest Codex account mode also copy `libcodex_app_server.so` and its `.sha256` file into LemonLoader's `UserLibs` folder.
 3. Use this exact same DLL for PCVR MelonLoader or Quest LemonLoader.
 4. On Quest, no PC-side BoneAI software is required. On PCVR, install Codex only if you want ChatGPT/Codex account login.
 5. Start BONELAB.
-6. On Quest, open **Preferences → BoneAI → AI Provider**, choose **Free OpenRouter**, enter an OpenRouter key, and reconnect. New Quest installs select this option by default.
-7. On PCVR Codex mode, open **Codex Sign-In → Sign In With Codex** and complete the browser code flow.
-8. Open **Assistant**, type into **Prompt**, and select **Send**.
+6. For Quest Codex, open **Preferences → BoneAI → AI Provider → Codex account sign-in**, then **Codex Account → Sign In With Codex**. Finish the device-code flow and return to BONELAB.
+7. For the free-model option, choose **Free OpenRouter**, enter your own OpenRouter key, and reconnect.
+8. Open **Assistant · Home**, type into **Ask BoneAI**, and select **Send prompt**.
 
-That is the complete BoneAI install. Quest talks directly to the selected provider over HTTPS. On PCVR, `BoneAI.dll` can directly start an installed official Codex App Server. Python and a bridge script are not required on either platform.
+Quest Codex uses the native library inside the game; PCVR starts a locally installed Codex App Server. API providers connect directly over HTTPS. Python and a bridge script are not required.
 
 Your BONELAB folder should contain:
 
@@ -54,6 +56,9 @@ BONELAB/
 │  ├─ LabFusion.dll                 (optional, for multiplayer)
 │  ├─ SpawnLab.dll                  (required only for spawning)
 │  └─ BoneAI.dll
+└─ UserLibs/
+   ├─ libcodex_app_server.so       (Quest Codex only)
+   └─ libcodex_app_server.so.sha256
 ```
 
 ## AI providers
@@ -62,7 +67,7 @@ Use **Preferences → BoneAI → AI Provider**, choose **Change Provider**, edit
 
 | Provider | Authentication | Default endpoint |
 |---|---|---|
-| Codex (PCVR) | ChatGPT/Codex browser sign-in; no key in BoneAI | Local Codex App Server |
+| Codex (PCVR/Quest beta) | ChatGPT/Codex device-code sign-in; no API key in BoneAI | Local Codex App Server |
 | OpenRouter Free (PCVR/Quest) | User-provided OpenRouter key; free model router | `https://openrouter.ai/api/v1/chat/completions` with `openrouter/free` |
 | OpenAI (PCVR/Quest) | OpenAI API key entered in-game or `OPENAI_API_KEY` | `https://api.openai.com/v1/responses` |
 | Claude | `ANTHROPIC_API_KEY` | `https://api.anthropic.com/v1/messages` |
@@ -80,7 +85,7 @@ OpenRouter Free does not mean anonymous access: create an OpenRouter key and ent
 
 BoneAI uses Codex App Server's official `chatgptDeviceCode` login flow. The game receives only a verification URL and one-time code. Your password, ChatGPT session, and resulting OAuth tokens remain inside Codex App Server and are never returned to or stored by BoneAI.
 
-1. Open **Preferences → BoneAI → Codex Sign-In**.
+1. Open **Preferences → BoneAI → Codex Account**.
 2. Choose **Sign In With Codex**.
 3. BoneAI copies the code and opens the official Codex device sign-in page in the system browser.
 4. Finish signing in and return to BONELAB. The status changes to **Connected: Codex** without a restart.
@@ -90,14 +95,15 @@ Use **Open Sign-In Page Again** if the browser was closed. Codex App Server secu
 ## Standalone Quest setup — no PC
 
 1. Install the universal `BoneAI.dll` with LemonLoader and Quest-compatible BoneLib/Fusion/SpawnLab versions matching your BONELAB patch.
-2. Start BONELAB and open **Preferences → BoneAI → AI Provider**.
-3. Choose **Free OpenRouter** for free-model routing, or cycle to OpenAI, Claude, Grok, DeepSeek, OpenRouter, or Custom.
-4. Enter the provider key in **API Key (saved securely)**. The visible field clears immediately; the key stays available after restarts until you choose **Clear Current API Key**.
-5. Select **Reconnect**, then use **Assistant**.
+2. For Codex account mode, place the bundled `libcodex_app_server.so` and `libcodex_app_server.so.sha256` in LemonLoader's `UserLibs` folder. This beta needs roughly 260 MB for the library plus space for a private runtime copy.
+3. Start BONELAB and open **Preferences → BoneAI → AI Provider**.
+4. Choose **Codex account sign-in** and then **Codex Account → Sign In With Codex**. Complete the code in the browser and return to BONELAB.
+5. Alternatively, choose **Free OpenRouter** and enter your key in **API Key (saved securely)**.
+6. Open **Assistant · Home**.
 
 All inference requests and tool-call loops run from the headset. A PC, Python bridge, remote WebSocket host, and Codex CLI are not used in this mode. The universal DLL is managed AnyCPU; exact Quest compatibility still depends on matching BONELAB, LemonLoader, BoneLib, Fusion, and SpawnLab versions.
 
-Official ChatGPT/Codex account login is separate from standalone provider mode. OpenAI's supported login flow is owned by Codex App Server, which must run throughout the session and for which OpenAI does not publish an Android/Quest target. The browser page only completes the sign-in ceremony; it does not run Codex. BoneAI therefore labels Codex account login PCVR-only instead of copying unsupported OAuth behavior or claiming that a browser replaces the App Server. Quest standalone defaults to OpenRouter's free-model router with a user-provided OpenRouter key.
+Quest Codex account mode uses a community-built Android port of Codex App Server from the pinned fork commit. This feature is experimental, not an official OpenAI Android distribution. The native server requires a random per-session WebSocket token, keeps account state in BONELAB's private Android files directory, and exposes only BoneAI's dynamic game tools to the model. Browser sign-in is the device-code ceremony; the native App Server continues to run inside BONELAB. Quest still defaults to OpenRouter Free on existing and new installations until you select Codex.
 
 ## Updating
 

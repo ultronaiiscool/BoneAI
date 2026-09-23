@@ -18,6 +18,7 @@ public sealed class CodexAppServerClient : IAgentClient
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JObject>> _requests = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ToolRegistry _tools;
+    private readonly Func<string> _bearerToken;
     private long _requestId;
     private string _assistantText = string.Empty;
     private readonly HashSet<string> _finalMessageIds = new(StringComparer.Ordinal);
@@ -32,22 +33,30 @@ public sealed class CodexAppServerClient : IAgentClient
     public event Action<string>? DeltaReceived;
     public event Action<bool, string?>? LoginCompleted;
 
-    public CodexAppServerClient(ToolRegistry tools) => _tools = tools;
+    public CodexAppServerClient(ToolRegistry tools, Func<string> bearerToken)
+    {
+        _tools = tools;
+        _bearerToken = bearerToken;
+    }
 
     public async Task ConnectAsync(string endpoint, CancellationToken cancellationToken)
     {
         DisposeSocket();
         var uri = new Uri(endpoint);
         var isLoopback = uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
-        if (!isLoopback || uri.Scheme != "ws") throw new InvalidOperationException("Codex App Server is restricted to this PC (ws://localhost only).");
+        if (!isLoopback || uri.Scheme != "ws") throw new InvalidOperationException("Codex App Server is restricted to localhost.");
         _socket = new ClientWebSocket();
+        var bearer = _bearerToken();
+        if (PlatformInfo.IsAndroid && string.IsNullOrEmpty(bearer))
+            throw new InvalidOperationException("Quest Codex host has no authenticated connection token.");
+        if (!string.IsNullOrEmpty(bearer)) _socket.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         StatusChanged?.Invoke("Connecting");
         await _socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
         _ = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
         await RequestAsync("initialize", new JObject
         {
-            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "2.7.0" },
+            ["clientInfo"] = new JObject { ["name"] = "boneai", ["title"] = "BoneAI", ["version"] = "3.0.0" },
             ["capabilities"] = new JObject { ["experimentalApi"] = true }
         }, cancellationToken).ConfigureAwait(false);
         await SendAsync(new JObject { ["method"] = "initialized", ["params"] = new JObject() }, cancellationToken).ConfigureAwait(false);
