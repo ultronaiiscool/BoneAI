@@ -36,10 +36,13 @@ public sealed class ToolRegistry
         record.State = AgentActionState.Validating;
         try
         {
-            record.State = AgentActionState.Executing;
-            ActionChanged?.Invoke(call.Name);
-            AgentLog.Info($"Tool request {call.Name} ({call.Id})");
-            return Finish(await _dispatcher.InvokeAsync(() => handler(call)).WaitAsync(cancellationToken));
+            return Finish(await _dispatcher.InvokeAsync(() =>
+            {
+                record.State = AgentActionState.Executing;
+                ActionChanged?.Invoke(call.Name);
+                AgentLog.Info($"Tool request {call.Name} ({call.Id})");
+                return handler(call);
+            }, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -55,8 +58,11 @@ public sealed class ToolRegistry
         {
             record.State = result.State;
             record.Error = result.Reason;
-            record.FinishedUtc = DateTime.UtcNow;
+            record.FinishedUtc = result.State == AgentActionState.WaitingForNetwork ? null : DateTime.UtcNow;
             ActionChanged?.Invoke("Idle");
+            if (_actions.Count > 512)
+                foreach (var expired in _actions.Values.OrderByDescending(x => x.StartedUtc).Skip(256))
+                    _actions.TryRemove(expired.Id, out _);
             return result;
         }
     }
@@ -75,7 +81,9 @@ public sealed class ToolRegistry
             .Select(x => new
             {
                 x.Key,
-                Score = mandatory.Contains(x.Key) ? 10000 : ScoreWords(_searchText[x.Key], words)
+                Score = mandatory.Contains(x.Key) ? 10000 :
+                    ScoreWords(x.Key.Replace('.', ' ').Replace('_', ' '), words) * 3 +
+                    ScoreWords(_searchText[x.Key], words) - (IsGeneratedAlias(x.Key) ? 18 : 0)
             })
             .OrderByDescending(x => x.Score).ThenBy(x => x.Key)
             .Take(Math.Clamp(limit, 8, _descriptions.Count))
@@ -106,6 +114,15 @@ public sealed class ToolRegistry
         return score;
     }
 
+    private static bool IsGeneratedAlias(string name) =>
+        name.Contains(".preset_", StringComparison.Ordinal) ||
+        name.Contains(".find_component_", StringComparison.Ordinal) ||
+        name.Contains(".invoke_", StringComparison.Ordinal) ||
+        name.Contains(".scan_radius_", StringComparison.Ordinal) ||
+        name.Contains(".damage_", StringComparison.Ordinal) ||
+        name.Contains(".turn_left_", StringComparison.Ordinal) ||
+        name.Contains(".turn_right_", StringComparison.Ordinal);
+
     public JArray BuildOpenAiTools(IEnumerable<string>? selectedNames = null)
     {
         var tools = new JArray();
@@ -118,7 +135,7 @@ public sealed class ToolRegistry
                 {
                     ["name"] = ToExternalName(entry.Key),
                     ["description"] = entry.Value,
-                    ["parameters"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                    ["parameters"] = ToolSchemaCatalog.For(entry.Key)
                 }
             });
         return tools;
@@ -134,7 +151,7 @@ public sealed class ToolRegistry
                 ["type"] = "function",
                 ["name"] = ToExternalName(entry.Key),
                 ["description"] = entry.Value,
-                ["parameters"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                ["parameters"] = ToolSchemaCatalog.For(entry.Key)
             });
         return tools;
     }
@@ -148,7 +165,7 @@ public sealed class ToolRegistry
             {
                 ["name"] = ToExternalName(entry.Key),
                 ["description"] = entry.Value,
-                ["input_schema"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                ["input_schema"] = ToolSchemaCatalog.For(entry.Key)
             });
         return tools;
     }
@@ -170,7 +187,7 @@ public sealed class ToolRegistry
                     ["type"] = "function",
                     ["name"] = separator < 0 ? entry.Key : entry.Key[(separator + 1)..],
                     ["description"] = entry.Value,
-                    ["inputSchema"] = new JObject { ["type"] = "object", ["additionalProperties"] = true }
+                    ["inputSchema"] = ToolSchemaCatalog.For(entry.Key)
                 });
             }
             tools.Add(new JObject

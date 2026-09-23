@@ -153,7 +153,7 @@ BoneAI exposes exactly 350 structured game tools. The catalog combines the origi
 | Fusion | Read session/player state, find and follow players, switch avatars, attack through Fusion's damage sender, and report sync behavior |
 | Diagnostics | List loaded mods/capabilities, read recent MelonLoader errors, and show headset notifications |
 
-Every action has an ID and returns `success`, `failed`, or `cancelled` with real result data. If an object disappears or an API cannot perform the requested interaction, BoneAI reports the failure instead of claiming success.
+Every action has an ID and returns `success`, `failed`, `cancelled`, or `pending`. `pending` means the game accepted a request but BoneAI cannot yet confirm its outcome; it is **not** a completed action. For example, after a SpawnLab request, inspect the nearby world to verify the object exists. A cancelled action is skipped if it has not started; cancellation after execution begins cannot undo a game-side effect.
 
 ## Avatar discovery
 
@@ -163,17 +163,17 @@ If the list is empty, ask BoneAI to run `avatar.catalog_status` and `avatar.refr
 
 ## Fusion multiplayer
 
-BoneAI uses normal, verified BONELAB/Fusion paths. It does not label a local-only transform as synchronized and does not bypass host or object authority.
+BoneAI uses BONELAB/Fusion paths and checks local ownership before direct mutation of registered network entities. Calling a game or Fusion API does not, by itself, prove that a peer observed the outcome. Confirm important actions from a second client; `pending` responses must not be presented as synchronized success.
 
 | Action | Multiplayer behavior | BoneAI needed by other players? |
 |---|---|---|
-| Spawn | SpawnLab uses Fusion's `NetworkAssetSpawner` online and local spawning offline | No |
-| Grab/release | Marrow grip/hand paths already handled by Fusion | No |
-| Gun fire | Real gun firing path | No |
-| Seat enter/exit | Real Marrow seat path | No |
-| Avatar swap | Fusion `LocalAvatar.SwapAvatarCrate` while online | No |
-| Fusion-player damage | Fusion `PlayerSender.SendPlayerDamage` with a real Marrow attack | No |
-| Prop/NPC state | Uses ordinary game/Fusion ownership and replication when available | No |
+| Spawn | SpawnLab requests its network spawner online; callback and peer outcome are not synchronously confirmed | No custom BoneAI protocol; peer test required |
+| Grab/release | Marrow hand/grip path; hand attachment is checked locally | No custom BoneAI protocol; peer test required |
+| Gun fire | Real gun firing path; resulting hit/peer state is not synchronously confirmed | No custom BoneAI protocol; peer test required |
+| Seat enter/exit | Marrow seat path; local seat state is checked | No custom BoneAI protocol; peer test required |
+| Avatar swap | Fusion `LocalAvatar.SwapAvatarCrate` request online | No custom BoneAI protocol; peer test required |
+| Fusion-player damage | Fusion `PlayerSender.SendPlayerDamage` request with a Marrow attack | No custom BoneAI protocol; peer test required |
+| Prop/NPC state | Direct mutation is blocked for registered entities not locally owned; ownership alone does not prove replication | Depends on underlying game/Fusion path; peer test required |
 | Local health/stat boosts | Intentionally local only | Not synchronized |
 | Conversation and menu | Local only | Not synchronized |
 
@@ -206,7 +206,7 @@ Install/open Codex, then restart BONELAB. BoneAI searches the system `PATH` and 
 
 ### Spawning fails
 
-Install SpawnLab `1.0.0`, restart BONELAB, and refresh SpawnLab's catalog once. Then ask BoneAI to use `spawn.refresh` or `spawn.list` before spawning.
+Install SpawnLab `1.0.1`, restart BONELAB, and refresh SpawnLab's catalog once. Then ask BoneAI to use `spawn.refresh` or `spawn.list` before spawning. An accepted spawn request returns `pending`; search the world afterward to confirm it appeared.
 
 ### An object command fails
 
@@ -222,7 +222,8 @@ Ask BoneAI for `fusion.get_sync_report`. Local player stat changes, UI, conversa
 - Navigation is collision-unaware incremental movement, not full navmesh pathfinding.
 - Climbing, crouching, and generalized vehicle steering are not automated.
 - Modded interaction components vary widely; unsupported controls fail cleanly.
-- A spawn callback may finish after the initial tool response; the object will appear in the next nearby query.
+- SpawnLab's spawn call is fire-and-forget, so BoneAI returns `pending` until a later world query can confirm an object appeared. Similar game input requests may be pending when there is no safe outcome callback.
+- The Android native library is reused from the verified v3.0.0 build in v3.0.1; this update changes managed code. Automated tests and compilation do not replace physical Quest and two-client Fusion testing. See [the test checklist](docs/TESTING-v3.0.1.md).
 - The exact supported game stack matters because BONELAB uses generated IL2CPP assemblies.
 
 ## Build from source

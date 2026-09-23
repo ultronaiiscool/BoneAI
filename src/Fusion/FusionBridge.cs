@@ -3,6 +3,7 @@ using System.Reflection;
 using BoneAI.Infrastructure;
 using Il2CppSLZ.Marrow.Combat;
 using Il2CppSLZ.Marrow.Data;
+using Il2CppSLZ.Marrow.Interaction;
 using UnityEngine;
 
 namespace BoneAI.Fusion;
@@ -17,6 +18,11 @@ public sealed class FusionBridge
     private Type? _networkPlayer;
     private Type? _playerSender;
     private Type? _localAvatar;
+    private Type? _sceneManager;
+    private object? _marrowEntityCache;
+    private object? _pooleeCache;
+    private MethodInfo? _marrowCacheGet;
+    private MethodInfo? _pooleeCacheGet;
     private IReadOnlyList<PlayerSnapshot> _playerCache = Array.Empty<PlayerSnapshot>();
     private float _playerCacheExpiresAt;
 
@@ -25,6 +31,7 @@ public sealed class FusionBridge
     {
         get { try { return _networkInfo != null && ReadStatic<bool>(_networkInfo, "HasServer"); } catch { return false; } }
     }
+    public bool IsSceneNetworked => IsOnline && _sceneManager != null && ReadStatic<bool>(_sceneManager, "IsLevelNetworked");
 
     public void Initialize()
     {
@@ -35,7 +42,36 @@ public sealed class FusionBridge
         _networkPlayer = _assembly.GetType("LabFusion.Entities.NetworkPlayer");
         _playerSender = _assembly.GetType("LabFusion.Senders.PlayerSender");
         _localAvatar = _assembly.GetType("LabFusion.Player.LocalAvatar");
+        _sceneManager = _assembly.GetType("LabFusion.Scene.NetworkSceneManager");
+        _marrowEntityCache = _assembly.GetType("LabFusion.Entities.IMarrowEntityExtender")?
+            .GetField("Cache", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+        _pooleeCache = _assembly.GetType("LabFusion.Marrow.Extenders.PooleeExtender")?
+            .GetField("Cache", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+        _marrowCacheGet = _marrowEntityCache?.GetType().GetMethod("Get", BindingFlags.Public | BindingFlags.Instance);
+        _pooleeCacheGet = _pooleeCache?.GetType().GetMethod("Get", BindingFlags.Public | BindingFlags.Instance);
         AgentLog.Info($"Fusion bridge loaded for {_assembly.GetName().Version}.");
+    }
+
+    /// <summary>Fail closed before changing a multiplayer-visible object locally.</summary>
+    public string RequireLocalObjectAuthority(GameObject target)
+    {
+        if (!IsSceneNetworked) return IsOnline ? "local-only (Fusion level not networked)" : "offline";
+        var marrow = MarrowEntity.Cache.Get(target) ?? target.GetComponentInParent<MarrowEntity>() ?? target.GetComponentInChildren<MarrowEntity>();
+        object? entity = marrow == null ? null : _marrowCacheGet?.Invoke(_marrowEntityCache, new object[] { marrow });
+        if (entity == null)
+        {
+            var poolee = target.GetComponentsInChildren<Component>()
+                .FirstOrDefault(x => x.GetType().Name == "Poolee");
+            if (poolee != null) entity = _pooleeCacheGet?.Invoke(_pooleeCache, new object[] { poolee });
+        }
+        if (entity == null)
+            throw new InvalidOperationException("Fusion has no network entity for this object; local manipulation was blocked to avoid desync.");
+        if (entity.GetType().GetProperty("IsRegistered")?.GetValue(entity) is not true)
+            throw new InvalidOperationException("Fusion network entity is not registered yet.");
+        if (entity.GetType().GetProperty("IsOwner")?.GetValue(entity) is not true)
+            throw new InvalidOperationException("The local player does not own this Fusion network entity.");
+        var id = entity.GetType().GetProperty("ID")?.GetValue(entity);
+        return $"Fusion local owner (entity {id}); peer replication not independently confirmed";
     }
 
     public object GetSession()
@@ -148,9 +184,9 @@ public sealed class FusionBridge
     public object GetSynchronizationReport() => new
     {
         directFusion = new[] { "avatar changes through LocalAvatar.SwapAvatarCrate", "remote-player damage through PlayerSender.SendPlayerDamage", "player/rig discovery through NetworkPlayer.Players" },
-        ordinaryFusionPatches = new[] { "SpawnLab network spawning", "owned prop transforms", "grabs/releases", "gun shots", "NPC damage/death", "seats" },
+        ordinaryFusionPatches = new[] { "SpawnLab network spawn requests", "locally owned prop transforms", "grabs/releases", "gun shots", "NPC damage/death", "seats" },
         localOnly = new[] { "local health overrides", "strength/speed/vitality overrides", "Codex conversation and UI" },
-        note = "Ordinary patched actions still depend on Fusion ownership and server permissions; the agent reports failures instead of claiming synchronization."
+        note = "Object mutation now requires confirmed local Fusion ownership. A local API call is not proof that peers received the result; spawn and asynchronous actions remain pending until independently observed."
     };
 
     private static T? ReadStatic<T>(Type type, string name)

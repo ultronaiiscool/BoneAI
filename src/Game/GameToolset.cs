@@ -287,6 +287,13 @@ public sealed class GameToolset
             return handler(c);
         });
 
+    private string RequireOwnedNetworkObject(GameObject go)
+    {
+        if (_fusion.IsSceneNetworked && !_config.FusionSynchronization.Value)
+            throw new InvalidOperationException("Fusion synchronization is disabled; network-visible object mutation was blocked.");
+        return _fusion.RequireLocalObjectAuthority(go);
+    }
+
     public object GetCompactContext() => new
     {
         player = SafeState(),
@@ -471,16 +478,19 @@ public sealed class GameToolset
     private ToolResult Spawn(ToolCall c)
     {
         var request=c.Arguments["barcode"]?.Value<string>()??Str(c,"query");
-        if(!_spawnLab.Available)return ToolResult.Failure(c,"SpawnLab 1.0.0 is not loaded; spawning was not attempted.");
-        if(c.Arguments["position"]!=null)return ToolResult.Failure(c,"SpawnLab 1.0.0 chooses its verified front-of-player transform and does not expose an arbitrary-position API.");
+        if(!_spawnLab.Available)return ToolResult.Failure(c,"SpawnLab is not loaded; spawning was not attempted.");
+        if(c.Arguments["position"]!=null)return ToolResult.Failure(c,"SpawnLab chooses its front-of-player transform and does not expose an arbitrary-position API.");
         var entry=_spawnLab.Spawn(request);
-        return ToolResult.Success(c,new{provider="SpawnLab",title=entry.Title,barcode=entry.Barcode,source=entry.Source,pending=true,synchronization=_fusion.IsAvailable?"SpawnLab NetworkAssetSpawner when the Fusion level is networked":"SpawnLab LocalAssetSpawner"});
+        // SpawnLab's private Spawn method is fire-and-forget and handles its own errors.
+        // Returning success here would falsely claim that a Poolee exists or peers received it.
+        return ToolResult.Pending(c,new{provider="SpawnLab",title=entry.Title,barcode=entry.Barcode,source=entry.Source,confirmed=false},
+            "SpawnLab invocation returned, but the spawned object is not confirmed. Query nearby objects before claiming completion.");
     }
-    private ToolResult Despawn(ToolCall c){var go=NeedObject(c);var poolee=FindComponentByName(go,"Poolee");var method=poolee?.GetType().GetMethod("Despawn",Type.EmptyTypes);if(method!=null){method.Invoke(poolee,null);return ToolResult.Success(c,new{path="Poolee.Despawn",synchronization=_fusion.IsAvailable?"Fusion Poolee despawn patch when network-owned":"offline"});}return ToolResult.Failure(c,"Object is not a pooled spawnable and was not destroyed locally.");}
+    private ToolResult Despawn(ToolCall c){var go=NeedObject(c);var sync=RequireOwnedNetworkObject(go);var poolee=FindComponentByName(go,"Poolee");var method=poolee?.GetType().GetMethod("Despawn",Type.EmptyTypes);if(method!=null){method.Invoke(poolee,null);return ToolResult.Pending(c,new{path="Poolee.Despawn",synchronization=sync},"Despawn was requested; object removal and peer replication are not yet confirmed.");}return ToolResult.Failure(c,"Object is not a pooled spawnable and was not destroyed locally.");}
 
-    private ToolResult Grab(ToolCall c){var go=NeedObject(c); var hand=Hand(c); var grip=go.GetComponentInChildren<Grip>(); if(grip==null)return ToolResult.Failure(c,"No Grip component was found."); grip.Snatch(hand,false); return ToolResult.Success(c,new{objectId=Str(c,"objectId"),hand=HandName(c)});}
-    private ToolResult Release(ToolCall c){var h=Hand(c); h.DetachObject(); return ToolResult.Success(c,new{hand=HandName(c)});}
-    private ToolResult PullToHand(ToolCall c){var go=NeedObject(c); var h=Hand(c); var grip=go.GetComponentInChildren<Grip>(); if(grip==null)return ToolResult.Failure(c,"No Grip component was found."); go.transform.position=h.transform.position; grip.Snatch(h,false); return ToolResult.Success(c,new{objectId=Str(c,"objectId")});}
+    private ToolResult Grab(ToolCall c){var go=NeedObject(c); var hand=Hand(c); var grip=go.GetComponentInChildren<Grip>(); if(grip==null)return ToolResult.Failure(c,"No Grip component was found."); RequireOwnedNetworkObject(go); grip.Snatch(hand,false); return HeldObjectMatches(go,HeldObject(hand)) ? ToolResult.Success(c,new{objectId=Str(c,"objectId"),hand=HandName(c),confirmed=true}) : ToolResult.Pending(c,new{objectId=Str(c,"objectId"),hand=HandName(c)},"Grip was invoked, but the hand attachment is not confirmed yet.");}
+    private ToolResult Release(ToolCall c){var h=Hand(c); h.DetachObject(); return HeldObject(h)==null ? ToolResult.Success(c,new{hand=HandName(c),confirmed=true}) : ToolResult.Pending(c,new{hand=HandName(c)},"Detach was invoked, but the hand still reports an attached object.");}
+    private ToolResult PullToHand(ToolCall c){var go=NeedObject(c); var h=Hand(c); var grip=go.GetComponentInChildren<Grip>(); if(grip==null)return ToolResult.Failure(c,"No Grip component was found."); RequireOwnedNetworkObject(go); go.transform.position=h.transform.position; grip.Snatch(h,false); return HeldObjectMatches(go,HeldObject(h)) ? ToolResult.Success(c,new{objectId=Str(c,"objectId"),confirmed=true}) : ToolResult.Pending(c,new{objectId=Str(c,"objectId")},"Pull and grip were invoked, but attachment is not confirmed yet.");}
     private ToolResult GrabNearest(ToolCall c)
     {
         var query = c.Arguments["query"]?.Value<string>() ?? string.Empty;
@@ -497,15 +507,17 @@ public sealed class GameToolset
         var head = Player.Head ?? throw new InvalidOperationException("Player head is unavailable.");
         var distance = Mathf.Clamp(c.Arguments["distance"]?.Value<float>() ?? 1.2f, 0.4f, 4f);
         var destination = head.transform.position + head.transform.forward * distance - Vector3.up * 0.25f;
+        var synchronization = RequireOwnedNetworkObject(go);
         body.velocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;
         body.MovePosition(destination);
-        return ToolResult.Success(c, new { objectId = Str(c, "objectId"), position = V(destination), synchronization = _fusion.IsOnline ? "ordinary Fusion owned-rigidbody path when ownership permits" : "offline" });
+        return ToolResult.Pending(c, new { objectId = Str(c, "objectId"), requestedPosition = V(destination), synchronization },
+            "Rigidbody move was requested; inspect the object after the physics step before claiming its position or peer visibility.");
     }
     private ToolResult Activate(ToolCall c)
     {
         var go=NeedObject(c); var names=new[]{"OnPress","Press","Activate","Use","Interact","Open"};
-        foreach(var component in go.GetComponentsInChildren<Component>()) foreach(var name in names){var m=component.GetType().GetMethod(name,BindingFlags.Instance|BindingFlags.Public,null,Type.EmptyTypes,null); if(m!=null){m.Invoke(component,null); return ToolResult.Success(c,new{component=component.GetType().Name,method=name});}}
+        foreach(var component in go.GetComponentsInChildren<Component>()) foreach(var name in names){var m=component.GetType().GetMethod(name,BindingFlags.Instance|BindingFlags.Public,null,Type.EmptyTypes,null); if(m!=null){m.Invoke(component,null); return ToolResult.Pending(c,new{component=component.GetType().Name,method=name},"Interaction method was invoked; resulting object state is not confirmed.");}}
         return ToolResult.Failure(c,"No supported public interaction method was exposed by this object.");
     }
     private ToolResult ApplyForce(ToolCall c)=>RigidAction(c,rb=>rb.AddForce(Vec(c.Arguments["force"]),ForceMode.Force));
@@ -513,11 +525,11 @@ public sealed class GameToolset
     private ToolResult SetVelocity(ToolCall c)=>RigidAction(c,rb=>rb.velocity=Vec(c.Arguments["velocity"]));
     private ToolResult MoveObject(ToolCall c)=>RigidAction(c,rb=>rb.MovePosition(Vec(c.Arguments["position"])));
     private ToolResult RotateObject(ToolCall c)=>RigidAction(c,rb=>rb.MoveRotation(Quaternion.Euler(Vec(c.Arguments["rotation"]))));
-    private ToolResult RigidAction(ToolCall c,Action<Rigidbody> action){var rb=NeedObject(c).GetComponentInChildren<Rigidbody>()??throw new InvalidOperationException("Object has no Rigidbody."); action(rb); return ToolResult.Success(c,new{objectId=Str(c,"objectId")});}
+    private ToolResult RigidAction(ToolCall c,Action<Rigidbody> action){var go=NeedObject(c);var rb=go.GetComponentInChildren<Rigidbody>()??throw new InvalidOperationException("Object has no Rigidbody.");var sync=RequireOwnedNetworkObject(go);action(rb);return ToolResult.Pending(c,new{objectId=Str(c,"objectId"),synchronization=sync},"Physics command was issued; its next-step transform and peer replication are not yet confirmed.");}
 
     private ToolResult Aim(ToolCall c){var target=NeedObject(c); var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); held.transform.rotation=Quaternion.LookRotation(target.transform.position-held.transform.position,Vector3.up); return ToolResult.Success(c);}
-    private ToolResult Shoot(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var fire=gun.GetType().GetMethod("Fire",Type.EmptyTypes)??throw new MissingMethodException("Gun.Fire"); var shots=Math.Clamp(c.Arguments["shots"]?.Value<int>()??1,1,20); for(var i=0;i<shots;i++)fire.Invoke(gun,null); return ToolResult.Success(c,new{shots,synchronization=_fusion.IsAvailable?"ordinary Fusion gun-shot patch":"offline"});}
-    private ToolResult Reload(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var m=gun.GetType().GetMethod("InstantLoadAsync",Type.EmptyTypes)??throw new MissingMethodException("Gun.InstantLoadAsync"); m.Invoke(gun,null); return ToolResult.Success(c);}
+    private ToolResult Shoot(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var fire=gun.GetType().GetMethod("Fire",Type.EmptyTypes)??throw new MissingMethodException("Gun.Fire"); var attempts=Math.Clamp(c.Arguments["shots"]?.Value<int>()??1,1,20); for(var i=0;i<attempts;i++)fire.Invoke(gun,null); return ToolResult.Pending(c,new{attemptedShots=attempts},"Gun.Fire was invoked; ammunition, projectile, hit, and peer delivery were not confirmed.");}
+    private ToolResult Reload(ToolCall c){var held=HeldObject(Hand(c))??throw new InvalidOperationException("Hand is empty."); var gun=FindComponentByName(held,"Gun")??throw new InvalidOperationException("Held object has no Gun component."); var m=gun.GetType().GetMethod("InstantLoadAsync",Type.EmptyTypes)??throw new MissingMethodException("Gun.InstantLoadAsync"); m.Invoke(gun,null); return ToolResult.Pending(c,new{requested=true},"Async reload was requested; completion and ammunition were not confirmed.");}
     private ToolResult DamageTarget(ToolCall c)
     {
         var go=NeedObject(c); var amount=Num(c,"amount");
@@ -528,14 +540,16 @@ public sealed class GameToolset
             var receive = comp.GetType().GetMethod("ReceiveAttack", new[] { typeof(Attack) });
             if (receive != null)
             {
+                var synchronization = RequireOwnedNetworkObject(go);
                 receive.Invoke(comp, new object[] { attack });
-                return ToolResult.Success(c, new { component = comp.GetType().Name, method = "ReceiveAttack", amount, synchronization = _fusion.IsOnline ? "ordinary Fusion damage patch when network-owned" : "offline" });
+                return ToolResult.Pending(c, new { component = comp.GetType().Name, method = "ReceiveAttack", requestedDamage=amount, synchronization }, "Attack receiver was invoked; health change and peer delivery were not confirmed.");
             }
             var legacy = comp.GetType().GetMethod("TAKEDAMAGE", new[] { typeof(float) }) ?? comp.GetType().GetMethod("TakeDamage", new[] { typeof(float) });
             if (legacy != null)
             {
+                if (_fusion.IsOnline) return ToolResult.Failure(c,"Legacy local-only damage was blocked in Fusion to avoid desync.");
                 legacy.Invoke(comp, new object[] { amount });
-                return ToolResult.Success(c, new { component = comp.GetType().Name, method = legacy.Name, amount, synchronization = "local/legacy" });
+                return ToolResult.Pending(c, new { component = comp.GetType().Name, method = legacy.Name, requestedDamage=amount }, "Legacy damage method was invoked; health change was not confirmed.");
             }
         }
         return ToolResult.Failure(c,"Target exposes no supported damage receiver.");
@@ -555,14 +569,14 @@ public sealed class GameToolset
             var fire = gun.GetType().GetMethod("Fire", Type.EmptyTypes) ?? throw new MissingMethodException("Gun.Fire");
             var shots = Math.Clamp(c.Arguments["shots"]?.Value<int>() ?? 1, 1, 20);
             for (var i = 0; i < shots; i++) fire.Invoke(gun, null);
-            return ToolResult.Success(c, new { mode = "held gun", hand = handName, shots, synchronization = _fusion.IsOnline ? "ordinary Fusion gun patch" : "offline" });
+            return ToolResult.Pending(c, new { mode = "held gun", hand = handName, attemptedShots=shots }, "Gun.Fire was invoked; hits and peer delivery were not confirmed.");
         }
         if (_fusion.TryGetPlayerId(target, out var smallId))
         {
             if (!_config.FusionSynchronization.Value) return ToolResult.Failure(c, "Fusion synchronization is disabled.");
             var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
             _fusion.DamagePlayer(smallId, amount, origin, target.transform.position - origin);
-            return ToolResult.Success(c, new { mode = "Fusion player damage", smallId, amount, synchronization = "PlayerSender.SendPlayerDamage" });
+            return ToolResult.Pending(c, new { mode = "Fusion player damage", smallId, requestedDamage=amount, networkPath = "PlayerSender.SendPlayerDamage" }, "Fusion damage message sent; remote health change was not confirmed.");
         }
         var result = DamageTarget(new ToolCall { Id = c.Id, Name = c.Name, Arguments = new JObject { ["objectId"] = Str(c, "objectId"), ["amount"] = amount } });
         if (result.Result != "success") return result;
@@ -581,7 +595,7 @@ public sealed class GameToolset
         var amount = c.Arguments["amount"]?.Value<float>() ?? 25f;
         var origin = Player.Head?.transform.position ?? NeedRig().transform.position;
         _fusion.DamagePlayer(player.SmallId, amount, origin, player.Position - origin);
-        return ToolResult.Success(c, new { player = player.Username, smallId = player.SmallId, amount, synchronization = "PlayerSender.SendPlayerDamage" });
+        return ToolResult.Pending(c, new { player = player.Username, smallId = player.SmallId, requestedDamage=amount, networkPath = "PlayerSender.SendPlayerDamage" }, "Fusion damage message sent; remote health change was not confirmed.");
     }
     private ToolResult AttackNearest(ToolCall c)
     {
@@ -600,17 +614,18 @@ public sealed class GameToolset
         if (!_objects.TryGet(targetId, out var target)) return ToolResult.Failure(c, "Target object handle is missing or expired: " + targetId);
         var body = source.GetComponentInChildren<Rigidbody>() ?? throw new InvalidOperationException("Thrown object has no Rigidbody.");
         var force = Mathf.Clamp(c.Arguments["force"]?.Value<float>() ?? 15f, 1f, 60f);
+        var synchronization = RequireOwnedNetworkObject(source);
         body.AddForce((target.transform.position - body.position).normalized * force, ForceMode.VelocityChange);
-        return ToolResult.Success(c, new { objectId = Str(c, "objectId"), targetObjectId = targetId, force });
+        return ToolResult.Pending(c, new { objectId = Str(c, "objectId"), targetObjectId = targetId, requestedForce = force, synchronization }, "Throw impulse was issued; travel and impact are not confirmed.");
     }
-    private ToolResult MoveTo(ToolCall c){_moveDestination=Vec(c.Arguments["position"]);_followObject=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Success(c,new{started=true,destination=V(_moveDestination.Value)});}
+    private ToolResult MoveTo(ToolCall c){_moveDestination=Vec(c.Arguments["position"]);_followObject=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Pending(c,new{started=true,destination=V(_moveDestination.Value)},"Movement started; destination has not been reached yet.");}
     private ToolResult GoToObject(ToolCall c)
     {
         var go = NeedObject(c);
         _moveDestination = go.transform.position;
         _followObject = null;
         _moveSpeed = c.Arguments["speed"]?.Value<float>() ?? 2.5f;
-        return ToolResult.Success(c, new { started = true, objectId = Str(c, "objectId"), destination = V(_moveDestination.Value) });
+        return ToolResult.Pending(c, new { started = true, objectId = Str(c, "objectId"), destination = V(_moveDestination.Value) }, "Movement started; destination has not been reached yet.");
     }
     private ToolResult GoToPlayer(ToolCall c)
     {
@@ -619,7 +634,7 @@ public sealed class GameToolset
         c.Arguments["objectId"] = _objects.Register(player.RigObject);
         return GoToObject(c);
     }
-    private ToolResult Follow(ToolCall c){NeedObject(c);_followObject=Str(c,"objectId");_moveDestination=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Success(c,new{started=true});}
+    private ToolResult Follow(ToolCall c){NeedObject(c);_followObject=Str(c,"objectId");_moveDestination=null;_moveSpeed=c.Arguments["speed"]?.Value<float>()??2.5f;return ToolResult.Pending(c,new{started=true},"Follow behavior started and remains active until stopped.");}
     private ToolResult FollowFusionPlayer(ToolCall c)
     {
         var player = ResolveFusionPlayer(c);
@@ -629,9 +644,9 @@ public sealed class GameToolset
     }
     private ToolResult StopMovement(ToolCall c){_moveDestination=null;_followObject=null;return ToolResult.Success(c);}
     private ToolResult Turn(ToolCall c){var rig=NeedRig();var e=rig.transform.eulerAngles;e.y+=Num(c,"degrees");rig.Teleport(rig.transform.position,e,true);return ToolResult.Success(c,new{yaw=e.y});}
-    private ToolResult Jump(ToolCall c){var force=c.Arguments["force"]?.Value<float>()??4.5f;var bodies=NeedRig().GetComponentsInChildren<Rigidbody>();if(bodies.Length==0)return ToolResult.Failure(c,"Physics rig has no rigidbodies.");foreach(var rb in bodies)rb.AddForce(Vector3.up*force,ForceMode.VelocityChange);return ToolResult.Success(c,new{force,rigidbodies=bodies.Length});}
-    private ToolResult EnterVehicle(ToolCall c){var go=NeedObject(c);var seat=FindComponentByName(go,"Seat")??throw new InvalidOperationException("No Seat component found.");var m=seat.GetType().GetMethod("IngressRig")??throw new MissingMethodException("Seat.IngressRig");m.Invoke(seat,new object[]{NeedRig()});return ToolResult.Success(c,new{synchronization=_fusion.IsAvailable?"ordinary Fusion seat patch":"offline"});}
-    private ToolResult ExitVehicle(ToolCall c){var seat=NeedRig().activeSeat;if(seat==null)return ToolResult.Failure(c,"Player is not seated.");seat.EgressRig(false);return ToolResult.Success(c);}
+    private ToolResult Jump(ToolCall c){var force=c.Arguments["force"]?.Value<float>()??4.5f;var bodies=NeedRig().GetComponentsInChildren<Rigidbody>();if(bodies.Length==0)return ToolResult.Failure(c,"Physics rig has no rigidbodies.");foreach(var rb in bodies)rb.AddForce(Vector3.up*force,ForceMode.VelocityChange);return ToolResult.Pending(c,new{requestedForce=force,rigidbodies=bodies.Length},"Jump impulse was issued; actual motion is not confirmed.");}
+    private ToolResult EnterVehicle(ToolCall c){var go=NeedObject(c);var seat=FindComponentByName(go,"Seat")??throw new InvalidOperationException("No Seat component found.");var m=seat.GetType().GetMethod("IngressRig")??throw new MissingMethodException("Seat.IngressRig");m.Invoke(seat,new object[]{NeedRig()});return NeedRig().activeSeat!=null ? ToolResult.Success(c,new{seated=true,peerReplicationConfirmed=false}) : ToolResult.Pending(c,new{requested=true},"Seat ingress was invoked; seated state is not confirmed yet.");}
+    private ToolResult ExitVehicle(ToolCall c){var seat=NeedRig().activeSeat;if(seat==null)return ToolResult.Failure(c,"Player is not seated.");seat.EgressRig(false);return NeedRig().activeSeat==null ? ToolResult.Success(c,new{seated=false,peerReplicationConfirmed=false}) : ToolResult.Pending(c,new{requested=true},"Seat egress was invoked; exit is not confirmed yet.");}
     private ToolResult LoadedMods(ToolCall c)=>ToolResult.Success(c,AppDomain.CurrentDomain.GetAssemblies().Select(a=>new{name=a.GetName().Name,version=a.GetName().Version?.ToString()}).Where(x=>!string.IsNullOrWhiteSpace(x.name)).OrderBy(x=>x.name).ToArray());
     private ToolResult ModCapabilities(ToolCall c)
     {
@@ -755,6 +770,8 @@ public sealed class GameToolset
     private static Hand Hand(ToolCall c)=>HandName(c)=="left"?(Player.LeftHand??throw new InvalidOperationException("Left hand unavailable.")):(Player.RightHand??throw new InvalidOperationException("Right hand unavailable."));
     private static string HandName(ToolCall c)=>(c.Arguments["hand"]?.Value<string>()??"right").ToLowerInvariant();
     private static GameObject? HeldObject(Hand hand)=>hand.m_CurrentAttachedGO;
+    private static bool HeldObjectMatches(GameObject requested, GameObject? held) => held != null &&
+        (held == requested || held.transform.IsChildOf(requested.transform) || requested.transform.IsChildOf(held.transform));
     private static string? HeldName(Hand? hand)=>hand==null?null:HeldObject(hand)?.name;
     private Component? FindComponentByName(GameObject go,string name)=>Components(go).Components.FirstOrDefault(x=>x!=null&&x.GetType().Name==name);
     private static string Str(ToolCall c,string key)=>c.Arguments[key]?.Value<string>()??throw new ArgumentException("Missing string argument: "+key);

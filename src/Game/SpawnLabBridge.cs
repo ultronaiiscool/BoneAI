@@ -50,9 +50,7 @@ public sealed class SpawnLabBridge
     {
         var mod = FindMod() ?? throw new InvalidOperationException("SpawnLab is not loaded.");
         var entries = GetEntries();
-        var entry = entries.FirstOrDefault(x => string.Equals(x.Barcode, barcodeOrName, StringComparison.OrdinalIgnoreCase))
-                    ?? entries.OrderBy(x => Score(x.Title, barcodeOrName)).FirstOrDefault()
-                    ?? throw new InvalidOperationException("SpawnLab has no spawnable entries.");
+        var entry = Resolve(entries, barcodeOrName);
         var method = mod.GetType().GetMethod("Spawn", BindingFlags.Instance | BindingFlags.NonPublic)
                      ?? throw new MissingMethodException("SpawnLab.SpawnLabMod.Spawn");
         try { method.Invoke(mod, new[] { entry.NativeEntry }); }
@@ -61,11 +59,19 @@ public sealed class SpawnLabBridge
         return entry;
     }
 
-    private static int Score(string value, string query)
+    private static Entry Resolve(IReadOnlyList<Entry> entries, string query)
     {
-        value = value.ToLowerInvariant(); query = query.ToLowerInvariant();
-        if (value == query) return 0;
-        if (value.Contains(query)) return 1 + value.IndexOf(query, StringComparison.Ordinal);
-        return Math.Abs(value.Length - query.Length) + 20;
+        query = query.Trim();
+        if (query.Length == 0) throw new ArgumentException("Provide a spawnable name or exact barcode.");
+        var exact = entries.FirstOrDefault(x => x.Barcode.Equals(query, StringComparison.OrdinalIgnoreCase))
+                    ?? entries.FirstOrDefault(x => x.Title.Equals(query, StringComparison.OrdinalIgnoreCase));
+        if (exact != null) return exact;
+        var matches = entries.Where(x => x.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+                                         || x.Barcode.Contains(query, StringComparison.OrdinalIgnoreCase)).Take(6).ToArray();
+        if (matches.Length == 1) return matches[0];
+        if (matches.Length > 1)
+            throw new InvalidOperationException("Ambiguous spawnable. Search the catalog and use an exact barcode: " +
+                string.Join(", ", matches.Take(5).Select(x => x.Title + " (" + x.Barcode + ")")));
+        throw new InvalidOperationException("Spawnable not found. Use spawn.list to find an installed title or barcode.");
     }
 }

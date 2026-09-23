@@ -1,6 +1,6 @@
 {
   "name": "BoneAI",
-  "version_number": "3.0.0",
+  "version_number": "3.0.1",
   "website_url": "https://github.com/ultronaiiscool/BoneAI",
   "description": "BoneAI v3: native Quest Codex account sign-in, OpenRouter Free, voice beta, game tools, SpawnLab, and Fusion.",
   "dependencies": [

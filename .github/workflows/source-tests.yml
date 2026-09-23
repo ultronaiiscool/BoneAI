@@ -1,0 +1,24 @@
+name: BoneAI source tests
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - name: Dispatcher cancellation and execution
+        run: dotnet run --project tests/DispatcherSmoke/DispatcherSmoke.csproj -c Release
+      - name: Tool argument schemas
+        run: dotnet run --project tests/ToolSchemaSmoke/ToolSchemaSmoke.csproj -c Release
+      - name: Verify pinned native source archive
+        run: echo 'E83AF5F169AABE7FCB0D4B230FD03BA26F5CFF191A9BA508AF5D0634737CEFE0  native/codex-android-source-v3.zip' | sha256sum --check

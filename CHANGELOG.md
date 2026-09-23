@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1 — Reliability and truthful action results
+
+- Fixed cancellation of queued game actions so they cannot run after cancellation; actions already executing now return their real result rather than a misleading cancelled result.
+- Added `pending` results for fire-and-forget SpawnLab, input, combat, and network requests. The assistant is instructed to verify the game world instead of claiming completion prematurely.
+- Added local Fusion entity ownership checks before direct manipulation of registered network objects and made synchronization reports distinguish local acceptance from peer confirmation.
+- Replaced wrong-best-match spawning with exact/unique catalog resolution and an ambiguity error when multiple spawnables match.
+- Added typed argument schemas for core actions, improved tool selection, and bounded recent action history.
+- Added automated dispatcher/schema smoke tests, source CI, a physical-device checklist, and release checksums. No autoupdater.
+- Reuses the same pinned Android native Codex App Server library as v3.0.0. Physical Quest and two-client Fusion behavior still require user testing.
+
 ## 3.0.0 — Native Quest Codex
 
 - Integrated an Android ARM64 Codex App Server from the BoneAI branch of the user's Codex fork. Quest can start it inside BONELAB and use persistent ChatGPT/Codex device-code sign-in without a PC or API key.

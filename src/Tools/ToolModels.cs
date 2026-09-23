@@ -25,6 +25,9 @@ public sealed class ToolResult
 
     public static ToolResult Failure(ToolCall call, string reason) => new()
     { ActionId = call.Id, Action = call.Name, Result = "failed", State = AgentActionState.Failed, Reason = reason };
+
+    public static ToolResult Pending(ToolCall call, object? data, string reason) => new()
+    { ActionId = call.Id, Action = call.Name, Result = "pending", State = AgentActionState.WaitingForNetwork, Data = data, Reason = reason };
 }
 
 public sealed class ActionRecord
