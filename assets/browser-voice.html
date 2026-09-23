@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BoneAI Voice (Beta)</title>
+  <style>
+    :root{color-scheme:dark;font:18px system-ui,sans-serif;background:#0d0d18;color:#f8f8fc}
+    body{max-width:760px;margin:32px auto;padding:16px}
+    h1{font-size:2rem;margin:0 0 18px}
+    .card{background:#1b1b2a;border:1px solid #34344a;border-radius:18px;padding:22px;margin:16px 0}
+    p{line-height:1.5}label{display:block;margin:16px 0 8px}
+    select,input,button{font:inherit;border-radius:10px;padding:11px 14px}
+    select,input{color:#fff;background:#10101e;border:1px solid #66677e;box-sizing:border-box;width:100%}
+    button{background:#ff681e;border:0;color:white;font-weight:650;cursor:pointer;margin:8px 8px 8px 0}
+    button:disabled{opacity:.5;cursor:not-allowed}.secondary{background:#45455c}
+    .hint{color:#babacc;font-size:.9rem}.error{color:#ffb5a0}.ok{color:#7ee2b0}
+    #heard{color:#ffad79;min-height:1.5em;word-wrap:break-word}
+  </style>
+</head>
+<body>
+  <h1>BoneAI Browser Voice <small>(Beta)</small></h1>
+  <div class="card">
+    <p id="status" role="status" aria-live="polite">Choose a mode, then press Start listening.</p>
+    <label for="mode">Speech recognition</label>
+    <select id="mode">
+      <option value="local">On-device (no speech-service connection)</option>
+      <option value="browser">Browser speech service (may need internet)</option>
+    </select>
+    <p id="mode-help" class="hint"></p>
+    <label for="language">Language</label>
+    <select id="language">
+      <option value="en-US">English (US)</option>
+      <option value="de-DE">German</option>
+      <option value="it-IT">Italian</option>
+      <option value="pt-PT">Portuguese</option>
+      <option value="es-ES">Spanish</option>
+      <option value="ko-KR">Korean</option>
+    </select>
+    <button id="start" type="button">Start listening</button>
+    <p>Wake word: <strong id="wake"></strong></p>
+    <p id="heard"></p>
+  </div>
+  <div class="card">
+    <h2>Type a command if speech is unavailable</h2>
+    <p class="hint">This sends directly to BoneAI. No wake word is needed when you press Send.</p>
+    <form id="manual-form">
+      <label for="manual">Command</label>
+      <input id="manual" maxlength="2000" autocomplete="off" placeholder="e.g. find the nearest Ford">
+      <button type="submit" class="secondary">Send command</button>
+    </form>
+    <p id="send-status" role="status" aria-live="polite"></p>
+  </div>
+  <p class="hint">Keep this page open for voice commands. Browser voice support varies by browser and device. On-device mode may require a one-time browser model download; it is not available everywhere. This page runs only on your device and sends commands to BoneAI's loopback bridge.</p>
+  <script>
+  'use strict';
+  const TOKEN = __TOKEN_JSON__;
+  const WAKE = __WAKE_JSON__;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const status = document.getElementById('status');
+  const sendStatus = document.getElementById('send-status');
+  const button = document.getElementById('start');
+  const mode = document.getElementById('mode');
+  const modeHelp = document.getElementById('mode-help');
+  const language = document.getElementById('language');
+  const heard = document.getElementById('heard');
+  document.getElementById('wake').textContent = WAKE;
+  const localSupported = !!(SR && 'processLocally' in SR.prototype &&
+    typeof SR.available === 'function' && typeof SR.install === 'function');
+  let active = false, preparing = false, recognition = null, restartTimer = null, armedUntil = 0;
+
+  function setStatus(message, error = false) {
+    status.textContent = message;
+    status.className = error ? 'error' : '';
+  }
+  function updateMode() {
+    if (!SR) {
+      mode.disabled = true;
+      button.disabled = true;
+      modeHelp.textContent = 'This browser does not provide SpeechRecognition. You can still type a command below.';
+      setStatus('Speech recognition is unavailable in this browser.', true);
+      return;
+    }
+    if (!localSupported) {
+      mode.value = 'browser';
+      mode.querySelector('[value="local"]').disabled = true;
+      modeHelp.textContent = 'On-device speech is not exposed by this browser. Its browser service may require internet or be unavailable.';
+    } else {
+      modeHelp.textContent = mode.value === 'local' ?
+        'On-device mode avoids the browser speech-service network error after its language model is installed.' :
+        'The browser service may need internet and can fail independently of BoneAI.';
+    }
+  }
+  updateMode();
+  mode.addEventListener('change', () => { if (active) stopListening('Mode changed. Press Start listening.'); updateMode(); });
+  language.addEventListener('change', () => { if (active) stopListening('Language changed. Press Start listening.'); });
+
+  function updateButton() {
+    button.disabled = preparing || !SR;
+    button.textContent = preparing ? 'Preparing speech model…' : active ? 'Stop listening' : 'Start listening';
+  }
+  function stopListening(message = 'Stopped.') {
+    active = false;
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = null;
+    if (recognition) { try { recognition.abort(); } catch (_) {} }
+    recognition = null;
+    updateButton();
+    setStatus(message);
+  }
+  async function ensureLocalModel() {
+    const lang = language.value;
+    let availability = await SR.available({ langs: [lang], processLocally: true });
+    if (availability === 'available') return true;
+    if (availability === 'downloadable' || availability === 'downloading') {
+      setStatus('Installing the browser on-device speech model for ' + lang + '…');
+      if (await SR.install({ langs: [lang], processLocally: true })) return true;
+    }
+    throw new Error('The browser has no on-device model for ' + lang + '. Try Browser speech service or type a command.');
+  }
+  function beginRecognition() {
+    if (!active) return;
+    const current = new SR();
+    recognition = current;
+    current.lang = language.value;
+    current.continuous = true;
+    current.interimResults = false;
+    if (mode.value === 'local') current.processLocally = true;
+    current.onstart = () => setStatus('Listening for “' + WAKE + '”…');
+    current.onresult = event => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) continue;
+        const spoken = event.results[i][0].transcript.trim();
+        heard.textContent = 'Heard: ' + spoken;
+        const index = spoken.toLocaleLowerCase().indexOf(WAKE.toLocaleLowerCase());
+        let command = '';
+        if (index >= 0) {
+          command = spoken.slice(index + WAKE.length).replace(/^[ ,:;\-]+/, '').trim();
+          armedUntil = Date.now() + 8000;
+        } else if (Date.now() < armedUntil) {
+          command = spoken;
+          armedUntil = 0;
+        }
+        if (command) void send(command);
+      }
+    };
+    current.onerror = event => {
+      const error = event.error || 'unknown';
+      if (error === 'no-speech') { setStatus('No speech heard. Listening again…'); return; }
+      active = false;
+      if (restartTimer) clearTimeout(restartTimer);
+      restartTimer = null;
+      updateButton();
+      if (error === 'network') setStatus('Your browser speech service could not connect. BoneAI’s local page is working. Try On-device mode if available, another browser, or type a command below.', true);
+      else if (error === 'not-allowed' || error === 'service-not-allowed') setStatus('Microphone or speech permission was denied. Allow microphone access for this localhost page and try again.', true);
+      else if (error === 'language-not-supported') setStatus('This language has no installed on-device speech model. Choose another language or Browser speech service.', true);
+      else setStatus('Browser speech error: ' + error + '. Try another mode or type a command below.', true);
+    };
+    current.onend = () => {
+      if (recognition === current) recognition = null;
+      if (active) restartTimer = setTimeout(beginRecognition, 1200);
+    };
+    try { current.start(); }
+    catch (error) { active = false; updateButton(); setStatus('Could not start browser speech: ' + error.message, true); }
+  }
+  button.addEventListener('click', async () => {
+    if (active) { stopListening(); return; }
+    if (preparing || !SR) return;
+    preparing = true;
+    updateButton();
+    try {
+      if (mode.value === 'local') {
+        if (!localSupported) throw new Error('On-device speech is unavailable in this browser.');
+        await ensureLocalModel();
+      }
+      active = true;
+      beginRecognition();
+    } catch (error) { setStatus(error.message || 'Speech setup failed.', true); }
+    finally { preparing = false; updateButton(); }
+  });
+
+  async function send(text) {
+    sendStatus.textContent = 'Submitting command…';
+    try {
+      const response = await fetch('/prompt?token=' + encodeURIComponent(TOKEN), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (response.status === 202) sendStatus.textContent = 'Command submitted to BoneAI.';
+      else if (response.status === 409) sendStatus.textContent = 'BoneAI is busy. Wait and try again.';
+      else sendStatus.textContent = 'BoneAI rejected the command (' + response.status + ').';
+    } catch (_) { sendStatus.textContent = 'Could not reach BoneAI’s local bridge. Return to BONELAB and reopen Browser Voice.'; }
+  }
+  document.getElementById('manual-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const field = document.getElementById('manual');
+    const text = field.value.trim();
+    if (!text) return;
+    field.value = '';
+    void send(text);
+  });
+  </script>
+</body>
+</html>

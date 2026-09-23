@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.1 — Browser voice recovery
+
+- Stopped the browser voice page from endlessly restarting after a fatal speech-service network error. It now reports the browser-side failure and lets the player retry deliberately.
+- Added feature-detected on-device speech recognition with browser-managed language-model installation, where supported. Browsers without the experimental API keep the browser-service option.
+- Added a typed-command fallback on the same localhost page so a speech outage does not block commands; the field clears after submission.
+- Embedded the page as a separate, testable asset and added browser-behavior tests and safer JSON escaping for the wake word.
+- No autoupdater and no change to the pinned Quest Codex native library.
+
 ## 3.1.0 — Built-in spawning
 
 - Removed the SpawnLab runtime and Thunderstore dependency. BoneAI now indexes the loaded Marrow warehouse itself, including base-game and installed-mod spawnables.

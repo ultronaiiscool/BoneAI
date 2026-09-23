@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using BoneAI.Infrastructure;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BoneAI.AI;
@@ -76,7 +75,7 @@ public sealed class BrowserVoiceServer : IDisposable
                 if (!HasValidToken(request.Target)) { await ReplyAsync(stream, 403, "text/plain; charset=utf-8", "Forbidden", cancellationToken).ConfigureAwait(false); return; }
                 if (request.Method == "GET")
                 {
-                    await ReplyAsync(stream, 200, "text/html; charset=utf-8", BuildPage(), cancellationToken).ConfigureAwait(false);
+                    await ReplyAsync(stream, 200, "text/html; charset=utf-8", BrowserVoicePage.Build(_token, _config.VoiceWakeWord.Value), cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 if (request.Method != "POST" || !request.Target.StartsWith("/prompt?", StringComparison.Ordinal))
@@ -144,15 +143,8 @@ public sealed class BrowserVoiceServer : IDisposable
     private static async Task ReplyAsync(NetworkStream stream, int status, string contentType, string body, CancellationToken cancellationToken)
     {
         var payload = Encoding.UTF8.GetBytes(body); var reason = status switch { 200 => "OK", 202 => "Accepted", 400 => "Bad Request", 403 => "Forbidden", 409 => "Conflict", _ => "Not Found" };
-        var header = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {payload.Length}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self' 'unsafe-inline'; connect-src 'self'\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n");
+        var header = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {payload.Length}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'\r\nPermissions-Policy: on-device-speech-recognition=(self), microphone=(self)\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(header.AsMemory(), cancellationToken).ConfigureAwait(false); await stream.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
-    }
-
-    private string BuildPage()
-    {
-        var wake = JsonConvert.SerializeObject(string.IsNullOrWhiteSpace(_config.VoiceWakeWord.Value) ? "Hey BoneAI" : _config.VoiceWakeWord.Value.Trim());
-        var token = JsonConvert.SerializeObject(_token);
-        return "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>BoneAI Voice</title><style>body{font:18px system-ui;background:#090913;color:#eee;max-width:720px;margin:40px auto;padding:24px}button{font-size:20px;padding:14px 22px;background:#ff641e;color:#fff;border:0;border-radius:12px}.card{background:#171725;padding:22px;border-radius:16px;margin:16px 0}#heard{color:#ff9b64}</style></head><body><h1>BoneAI Browser Voice (Beta)</h1><div class=\"card\"><p id=\"status\">Press Start and allow microphone access.</p><button id=\"start\">Start listening</button><p>Wake word: <b id=\"wake\"></b></p><p id=\"heard\"></p></div><p>Keep this page open. Speech recognition is provided by your browser and may use its online service. BoneAI does not impose a usage limit or require an STT API key.</p><script>const TOKEN=" + token + ",WAKE=" + wake + ";document.getElementById('wake').textContent=WAKE;const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let active=false,armedUntil=0,rec;if(!SR){document.getElementById('status').textContent='This browser does not support SpeechRecognition.';document.getElementById('start').disabled=true}else{rec=new SR();rec.continuous=true;rec.interimResults=false;rec.lang=navigator.language||'en-US';rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(!e.results[i].isFinal)continue;let text=e.results[i][0].transcript.trim();document.getElementById('heard').textContent='Heard: '+text;let lower=text.toLowerCase(),w=WAKE.toLowerCase(),at=lower.indexOf(w),cmd='';if(at>=0){cmd=text.slice(at+WAKE.length).replace(/^[ ,:;-]+/,'').trim();armedUntil=Date.now()+8000}else if(Date.now()<armedUntil){cmd=text;armedUntil=0}if(cmd)send(cmd)}};rec.onerror=e=>document.getElementById('status').textContent='Speech error: '+e.error;rec.onend=()=>{if(active)setTimeout(()=>{try{rec.start()}catch{}},350)};document.getElementById('start').onclick=()=>{active=!active;if(active){document.getElementById('start').textContent='Stop listening';document.getElementById('status').textContent='Listening for “'+WAKE+'”…';try{rec.start()}catch{}}else{document.getElementById('start').textContent='Start listening';document.getElementById('status').textContent='Stopped';rec.stop()}}}async function send(text){document.getElementById('status').textContent='Sending: '+text;try{let r=await fetch('/prompt?token='+encodeURIComponent(TOKEN),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});document.getElementById('status').textContent=r.ok?'Sent. Listening for “'+WAKE+'”…':'BoneAI rejected the command.'}catch(e){document.getElementById('status').textContent='BoneAI connection failed.'}}</script></body></html>";
     }
 
     private static string Trim(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";

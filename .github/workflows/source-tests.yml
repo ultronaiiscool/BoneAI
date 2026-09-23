@@ -22,5 +22,10 @@ jobs:
         run: dotnet run --project tests/ToolSchemaSmoke/ToolSchemaSmoke.csproj -c Release
       - name: Spawn catalog matching
         run: dotnet run --project tests/SpawnCatalogSmoke/SpawnCatalogSmoke.csproj -c Release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Browser voice error and fallback behavior
+        run: node tests/browser-voice-page.test.cjs
       - name: Verify pinned native source archive
         run: echo 'E83AF5F169AABE7FCB0D4B230FD03BA26F5CFF191A9BA508AF5D0634737CEFE0  native/codex-android-source-v3.zip' | sha256sum --check

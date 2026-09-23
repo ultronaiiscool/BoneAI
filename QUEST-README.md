@@ -20,6 +20,6 @@ Open **AI Provider → Free OpenRouter**, enter your own OpenRouter key in **API
 
 ## Voice beta
 
-**Voice · Beta → Open Free Browser Voice** opens a localhost page that waits for your wake word and sends the following command to BoneAI. Browser speech support, service availability, and background behavior depend on Quest Browser; BoneAI has no speech quota. Keep the browser page open.
+**Voice · Beta → Open Free Browser Voice** opens a localhost page that waits for your wake word and sends the following command to BoneAI. If Quest Browser exposes on-device speech recognition, select **On-device** (a language download may be needed). Otherwise, its browser speech service may require internet and can report a network error. The page now stops on that error and lets you type a command instead. Browser support and background behavior depend on Quest Browser; BoneAI has no speech quota. Keep the browser page open.
 
 There is no autoupdater. Quest Codex account mode is experimental until it has been tested on physical hardware.

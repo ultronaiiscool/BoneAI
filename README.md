@@ -124,7 +124,7 @@ BoneAI now has its own top-level Preferences button instead of appearing inside 
 
 Voice is optional and off by default. There are two modes:
 
-- **Free Browser Voice** opens a localhost page in Edge, Chrome, or Quest Browser. The browser performs speech recognition, waits for the configured wake word, and submits the following command to BoneAI. It requires no STT API key and BoneAI imposes no quota. Some browsers send audio to their own service; support, privacy, availability, and limits depend on that browser.
+- **Free Browser Voice** opens a localhost page in Edge, Chrome, or Quest Browser. The browser performs speech recognition, waits for the configured wake word, and submits the following command to BoneAI. It requires no STT API key and BoneAI imposes no quota. Choose **On-device** if the browser exposes that experimental capability; its language model may require a one-time download. Otherwise, **Browser speech service** may send audio to the browser vendor and requires that service to work. Support, privacy, availability, and limits depend on the browser. A typed-command field on the same page works even when speech recognition is unavailable.
 - **In-game microphone voice** records through Unity, uses OpenAI transcription, and optionally reads replies using OpenAI text-to-speech. This mode requires an OpenAI API key.
 
 1. Open **Preferences → BoneAI → Voice AI (Beta)** and edit **Wake Word** if desired (default: `Hey BoneAI`).
@@ -133,6 +133,8 @@ Voice is optional and off by default. There are two modes:
 4. For the original in-game mode, enter an OpenAI key, enable **Voice AI Beta**, and optionally enable **Speak AI Replies**.
 
 Browser wake-word detection is transcript-gated by the browser, not offline keyword spotting inside the DLL. The local bridge binds only to loopback and uses a fresh 256-bit session token. On standalone Quest, switching between BONELAB and Quest Browser may suspend one application; continuous background listening therefore depends on the headset/browser version and remains beta. A voice failure does not stop text chat or gameplay tools.
+
+If the page reports **browser speech service could not connect** (previously `Speech error: network`), the browser's recognition service failed; this does not mean BoneAI or your AI provider is offline. Stop and retry once, select **On-device** if available, or use the typed-command field. If On-device is disabled, that browser does not expose the required speech API; try a browser that does. Microphone access and, for the browser-service mode, internet access must be allowed. BoneAI cannot repair an unavailable third-party speech service.
 
 ## What BoneAI can do
 
@@ -222,7 +224,7 @@ Ask BoneAI for `fusion.get_sync_report`. Local player stat changes, UI, conversa
 - Climbing, crouching, and generalized vehicle steering are not automated.
 - Modded interaction components vary widely; unsupported controls fail cleanly.
 - Fusion's spawn callback confirms an object on the initiating client, not that every peer loaded or saw it. If no callback arrives within two minutes, BoneAI marks it unconfirmed and releases its callback registration; a slow peer may still finish later. Similar game input requests may be pending when there is no safe outcome callback.
-- The Android native library is reused from the verified v3.0.0 build; v3.1 changes managed code. Automated tests and compilation do not replace physical Quest and two-client Fusion testing. See [the test checklist](docs/TESTING-v3.1.0.md).
+- The Android native library is reused from the verified v3.0.0 build; v3.1.1 changes managed code and the browser page. Automated tests and compilation do not replace physical Quest and two-client Fusion testing. See [the test checklist](docs/TESTING-v3.1.1.md).
 - The exact supported game stack matters because BONELAB uses generated IL2CPP assemblies.
 
 ## Build from source
